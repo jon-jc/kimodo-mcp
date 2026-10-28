@@ -24,6 +24,8 @@ from .handoff import prepare_blender_handoff as prepare_blender_files
 from .handoff import prepare_character_handoff as prepare_character_files
 from .handoff import prepare_unreal_handoff as prepare_unreal_files
 from .jobs import JobStore, contained_file, redact
+from .planning import AnimationBrief, AnimationRevision, plan_revision
+from .planning import plan_animation as compile_animation_plan
 from .quality import analyze_motion, compare_motion
 from .review import compare_motion_reviews
 from .review import create_motion_review as create_review_file
@@ -98,6 +100,41 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
         return store.submit(request.model_dump(mode="json"))
 
     @mcp.tool(annotations=READ_ONLY)
+    def plan_animation(brief: AnimationBrief) -> dict[str, Any]:
+        """Turn a natural action description and optional timed beats into an explicit generation plan.
+
+        Choose draft, balanced or detailed effort. Defaults: four seconds, one candidate, seed zero,
+        current SOMA model, native postprocessing, NPZ and standard-T-pose BVH. No generation is started.
+        """
+        return compile_animation_plan(brief)
+
+    @mcp.tool(annotations=GENERATION)
+    def generate_animation(brief: AnimationBrief) -> dict[str, Any]:
+        """Generate from a plain-language brief with transparent presets; return a durable job immediately."""
+        plan = compile_animation_plan(brief)
+        job = store.submit(plan["request"], context={"brief": plan["brief"], "notes": plan["notes"]})
+        return {**job, "plan": plan["plan"], "notes": plan["notes"]}
+
+    @mcp.tool(annotations=GENERATION)
+    def revise_animation(job_id: str, revision: AnimationRevision, submit: bool = False) -> dict[str, Any]:
+        """Plan or submit a new version while preserving every setting not explicitly changed.
+
+        The assistant supplies the rewritten action, not a vague editing instruction. Timing edits
+        never silently retime existing constraints. The original job and outputs remain unchanged.
+        """
+        original = store.get(job_id)
+        plan = plan_revision(original["request"], revision)
+        plan["parent_job_id"] = job_id
+        if not submit:
+            return plan
+        context = {"parent_job_id": job_id, "revision": revision.model_dump(mode="json", exclude_none=True),
+                   "changes": plan["changes"], "parent_context": {
+                       key: value for key, value in original.get("context", {}).items() if key == "brief"
+                   }}
+        job = store.submit(plan["request"], context=context)
+        return {**job, "plan": plan["plan"], "changes": plan["changes"], "notes": plan["notes"]}
+
+    @mcp.tool(annotations=READ_ONLY)
     def get_job(job_id: str) -> dict[str, Any]:
         """Get durable status, current stage, request, and final export manifest."""
         return store.get(job_id)
@@ -147,6 +184,30 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
             if hashlib.file_digest(stream, "sha256").hexdigest() != artifact["sha256"]:
                 raise ValueError("Motion changed after the job completed")
         return artifact
+
+    @mcp.tool(annotations=READ_ONLY)
+    def extract_pose_constraint(
+        job_id: str, source_frame: Annotated[int, Field(ge=0, le=2399)],
+        target_frame: Annotated[int, Field(ge=0, le=2399)] = 0,
+        sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
+        constraint_type: Literal["fullbody", "left-hand", "right-hand", "left-foot", "right-foot"] = "fullbody",
+    ) -> dict[str, Any]:
+        """Reuse an actual SOMA pose as a constraint for a new generation, preserving its world position.
+
+        Returns a constraint to add to GenerateRequest.constraints. Validate the full new request;
+        pose anchoring does not guarantee terminal-joint twists, velocity continuity or a seamless loop.
+        """
+        from .pose import extract_pose_constraint as extract_pose
+
+        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz")
+        model = store.get(job_id)["request"]["model"]
+        constraint = extract_pose(artifact["absolute_path"], source_frame=source_frame,
+                                  target_frame=target_frame, target_model=model, constraint_type=constraint_type)
+        return {"constraint": constraint.model_dump(mode="json"), "model": model,
+                "source_job_id": job_id, "source_sample": sample_index, "source_frame": source_frame,
+                "source_sha256": artifact["sha256"],
+                "notes": ["World root position is retained; coordinates are meters with Y up.",
+                          "Validate destination duration and other constraints before generating."]}
 
     def review_path(job_id: str, key: str, suffix: str) -> Path:
         base = store.directory(job_id).resolve()

@@ -136,7 +136,7 @@ class JobStore:
                 (status or current, time.time(), json.dumps(record), job_id),
             )
 
-    def submit(self, request: dict, *, launch: bool = True) -> dict:
+    def submit(self, request: dict, *, launch: bool = True, context: dict | None = None) -> dict:
         if launch and self.settings.worker_mode == "service" and not self.service_status()["available"]:
             raise ValueError("Generation worker is offline. Start kimodo-mcp-worker outside the MCP client first.")
         job_id = uuid.uuid4().hex
@@ -151,7 +151,7 @@ class JobStore:
             directory = self.directory(job_id)
             directory.mkdir()
             atomic_json(directory / "request.json", request)
-            record = {"request": request, "cancel_requested": False}
+            record = {"request": request, "cancel_requested": False, "context": context or {}}
             conn.execute("INSERT INTO jobs VALUES (?,?,?,?,?)", (job_id, "queued", now, now, json.dumps(record)))
         if launch and self.settings.worker_mode == "child":
             try:

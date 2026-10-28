@@ -8,6 +8,8 @@ Kimodo produces motion on SOMA human, Unitree G1 robot, and SMPL-X body skeleton
 
 - Discover supported models, skeleton layouts, and export formats.
 - Describe an action or a sequence of timed actions.
+- Plan a natural-language brief, compare candidates, and revise a saved request while preserving unchanged settings.
+- Reuse a selected completed SOMA pose as a constraint for another generation.
 - Add root waypoints, paths, full-body keyframes, and hand or foot constraints.
 - Submit generation as a background job, inspect its status, and cancel it.
 - Inspect motion arrays and retrieve generated artifacts.
@@ -89,6 +91,8 @@ Ask your assistant:
 
 For a longer scene, describe self-contained segments of at most 10 seconds each. See [animation workflows](docs/animation-workflows.md) for coordinates, constraints, examples, and export choices.
 
+Use `plan_animation` for a reviewable brief, `generate_animation` to submit it, and `revise_animation` for a new version of a saved job. [Natural-language workflow](docs/natural-workflow.md) explains effort presets, timed beats, revision safeguards, and selected-pose reuse.
+
 For the supported fitted character, prepare and execute its Blender handoff, import the exported skeletal mesh into Unreal, then call `prepare_unreal_handoff` and `execute_unreal_handoff` with the actual project, mesh, and Skeleton paths. The execution tool uses Unreal's installed Python transport and accepts only the bridge's fixed, verified handoff script. [Editor setup and handoffs](docs/editor-handoffs.md) covers the required loopback settings.
 
 This complete path was verified in Blender 5.2.1 and Unreal 5.8.3 using a newly generated waving motion: the saved Unreal animation has 24 bone tracks and 120 sampled keys at 30 FPS. Native Unreal MCP independently confirmed the matching skeleton and saved asset. This establishes import and timing correctness; visual refinement and gameplay acceptance remain separate.
@@ -99,6 +103,10 @@ This complete path was verified in Blender 5.2.1 and Unreal 5.8.3 using a newly 
 | --- | --- |
 | `list_models` | Exact model identifiers and supported skeleton/export combinations. |
 | `health_check` | Bridge configuration; set `probe_runtime=true` for local dependency and GPU checks without downloading weights. |
+| `plan_animation` | Compile a description and optional timed beats into explicit settings without starting generation. |
+| `generate_animation` | Submit a natural-language brief with transparent effort and candidate defaults. |
+| `revise_animation` | Plan or submit a new version, preserving unchanged settings and explicitly handling constraint timing. |
+| `extract_pose_constraint` | Reuse a selected completed SOMA frame as a validated full-body or limb constraint for another request. |
 | `validate_motion` | Check a structured request and return its frame plan. |
 | `generate_motion` | Submit that request and receive a durable job ID. |
 | `get_job`, `list_jobs` | Inspect progress and recent jobs across clients sharing a data directory. |
