@@ -66,6 +66,8 @@ Changing duration or replacing beats when constraints exist requires `clear_cons
 
 ## Reuse a selected pose
 
+In the studio, select a completed candidate, load its character preview, pause on a source frame, and enable **Start from the current pose** while creating a new animation. MCP clients can pass `start_from: {job_id, sample_index, frame}` alongside `brief` to `plan_animation` or `generate_animation`. The server resolves the verified source artifact, anchors the body and hand/foot orientations at frame zero, and derives its starting heading. It retains the source world position; it does not blend clips or match their velocities. Planning records the source checksum and performs no inference.
+
 `extract_pose_constraint` reads a selected frame from a completed SOMA sample and returns a validated constraint for a new request. Source and destination frame indices are zero-based. For example, source frame 119 is the last sample of a 120-frame clip; target frame 0 anchors the start of the new clip.
 
 Add the returned constraint to the destination request, call `validate_motion`, and submit with `generate_motion`. The destination must have enough frames and must not contain conflicting constraints. Pose reuse preserves the selected root position in meters in Kimodo's Y-up coordinates. A hand or foot constraint also controls the planar root, following upstream behavior.
