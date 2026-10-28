@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -23,7 +24,10 @@ from .handoff import prepare_blender_handoff as prepare_blender_files
 from .handoff import prepare_character_handoff as prepare_character_files
 from .handoff import prepare_unreal_handoff as prepare_unreal_files
 from .jobs import JobStore, contained_file, redact
-from .schemas import GenerateRequest
+from .quality import analyze_motion, compare_motion
+from .review import compare_motion_reviews
+from .review import create_motion_review as create_review_file
+from .schemas import GenerateRequest, QualityThresholds
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
@@ -134,6 +138,89 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
             raise ValueError("Preview requires a native Kimodo NPZ artifact")
         target = store.directory(job_id) / (name.removesuffix(".npz") + "_preview.html")
         return create_preview(artifact["absolute_path"], target)
+
+    def motion_artifact(job_id: str, name: str) -> dict[str, Any]:
+        artifact = store.artifact(job_id, name)
+        if artifact["format"] != "npz":
+            raise ValueError("Motion review requires a native Kimodo NPZ artifact")
+        with Path(artifact["absolute_path"]).open("rb") as stream:
+            if hashlib.file_digest(stream, "sha256").hexdigest() != artifact["sha256"]:
+                raise ValueError("Motion changed after the job completed")
+        return artifact
+
+    def review_path(job_id: str, key: str, suffix: str) -> Path:
+        base = store.directory(job_id).resolve()
+        path = (base / "reviews" / (key + suffix)).resolve()
+        if not path.is_relative_to(base):
+            raise ValueError("Review output escapes its job storage")
+        return path
+
+    def write_review_report(path: Path, report: dict[str, Any]) -> None:
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                json.dump(report, stream, indent=2, allow_nan=False)
+            temporary.replace(path)
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def analyze_motion_quality(
+        job_id: str, name: str = "motion_00.npz", thresholds: QualityThresholds | None = None,
+    ) -> dict[str, Any]:
+        """Measure speed, jerk, bone drift, contact sliding, floor proxies and endpoint seams.
+
+        These are review diagnostics, not a realism score or automatic repair. Original motion is unchanged.
+        """
+        artifact = motion_artifact(job_id, name)
+        return analyze_motion(artifact["absolute_path"], thresholds=thresholds.model_dump() if thresholds else None)
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def create_motion_review(
+        job_id: str, name: str = "motion_00.npz", thresholds: QualityThresholds | None = None,
+    ) -> dict[str, Any]:
+        """Create an offline three-view player, exact-frame contact sheet and numerical diagnostic file.
+
+        Highlights uniform timeline samples and metric extrema with fixed whole-clip camera bounds.
+        """
+        artifact = motion_artifact(job_id, name)
+        report = analyze_motion(artifact["absolute_path"], thresholds=thresholds.model_dump() if thresholds else None)
+        key = "motion-" + hashlib.sha256(json.dumps(
+            [artifact["sha256"], report["thresholds"]], sort_keys=True,
+        ).encode()).hexdigest()[:20]
+        result = create_review_file(artifact["absolute_path"], review_path(job_id, key, ".html"), diagnostics=report)
+        report_path = review_path(job_id, key, ".json")
+        write_review_report(report_path, report)
+        return {**result, "diagnostics_path": str(report_path), "content_sha256": report["content_sha256"]}
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def compare_motions(
+        job_id: str, other_job_id: str, name: str = "motion_00.npz", other_name: str = "motion_00.npz",
+        offset_frames: Annotated[int, Field(ge=-2400, le=2400)] = 0,
+        space: Literal["world", "root_relative"] = "world",
+    ) -> dict[str, Any]:
+        """Compare two completed motion samples with synchronized exact-frame views and measured differences.
+
+        Requires matching FPS and skeletons. B frame = A frame + offset. Root-relative removes translation only.
+        Differences do not rank realism or prompt adherence; inspect both candidates before choosing.
+        """
+        first, second = motion_artifact(job_id, name), motion_artifact(other_job_id, other_name)
+        report = compare_motion(first["absolute_path"], second["absolute_path"],
+                                second_offset_frames=offset_frames, space=space)
+        key = "comparison-" + hashlib.sha256(json.dumps(
+            [first["sha256"], second["sha256"], offset_frames, space],
+        ).encode()).hexdigest()[:20]
+        result = compare_motion_reviews(
+            first["absolute_path"], second["absolute_path"], review_path(job_id, key, ".html"),
+            offset_frames=offset_frames, mode=space, diagnostics=report,
+        )
+        report_path = review_path(job_id, key, ".json")
+        write_review_report(report_path, report)
+        return {**result, "diagnostics_path": str(report_path), "comparison": report}
 
     def handoff_directory(job_id: str, source_kind: str, sample_index: int, attempt: int = 0) -> Path:
         job = store.get(job_id)
@@ -323,7 +410,10 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
             "2. Translate the brief into short text segments with explicit duration, seed, and model.\n"
             "3. Use validate_motion. Ask for missing artistic decisions only when necessary.\n"
             "4. Call generate_motion and poll get_job; use get_job_log on failure.\n"
-            "5. Call inspect_motion and preview_motion on a completed NPZ, then get_artifact for exports.\n"
+            "5. Call inspect_motion, analyze_motion_quality and create_motion_review on each candidate NPZ. "
+            "Use compare_motions for matching-rig candidates; inspect contact sliding, sudden changes, "
+            "prompt adherence and selected frames before choosing. Keep original samples; diagnostics "
+            "do not prove realism or justify blind smoothing. Then get_artifact for exports.\n"
             "6. For a skeleton use prepare_blender_handoff; for a configured fitted character use "
             "prepare_character_handoff. Run the returned trusted script through Blender MCP and check get_handoff_report.\n"
             "7. Import the character mesh into Unreal first, then prepare_unreal_handoff with its exact project, "

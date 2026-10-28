@@ -58,3 +58,15 @@ The upstream repository ships 16 completed example animations. The upstream demo
 - Compare several seeds when the motion is valid but the performance is unsuitable.
 - Keep seed, exact model, prompts, constraints, and generation settings alongside the artifact.
 - Use benchmark metrics only with their required reference data and embeddings; do not interpret missing scores as perfect results.
+
+## Review and compare candidates
+
+Call `analyze_motion_quality` for the completed job and its NPZ artifact, then `create_motion_review` for the same artifact. Open the returned local HTML file. It contains a frame player and contact sheet with front, side, and three-quarter views. Uniform timeline samples and labeled diagnostic extrema use the exact source poses. Fixed whole-clip camera bounds keep translation and scale changes visible.
+
+Inspect the frames around a reported maximum as well as the maximum itself. A large speed or jerk can be appropriate for a fast action; a contact-sliding measurement needs correct foot contact labels. These diagnostics are review aids with units and configurable sensitivities, not a universal score or automatic repair. Unavailable metrics state why they cannot be measured.
+
+Generate another candidate when the performance needs improvement. Keep the model, durations, and constraints consistent to compare seeds, or change one prompt, constraint, or supported postprocessing setting at a time. Use `compare_motions` with `job_id`, `other_job_id`, and their artifact names. Both inputs need matching FPS, skeleton, joint names, and hierarchy. Set `offset_frames` explicitly: a positive value compares the first clip's frame `i` with the second clip's frame `i + offset_frames`.
+
+Start with `space="world"` to preserve root movement. Use `space="root_relative"` to compare body poses after removing each frame's root translation; facing and scale remain unchanged. Both clips share the same camera bounds. Comparison does not retarget, resample, or blend the source motions.
+
+After selecting a candidate, inspect the character deformation in Blender and the imported animation in Unreal. Skeletal review cannot reveal every skinning, clothing, collision, or gameplay issue. Preserve the chosen job's request, artifact hashes, and import report. [Motion review](animate-review.md) describes the metrics, timing conventions, and implementation limits.

@@ -11,6 +11,7 @@ Kimodo produces motion on SOMA human, Unitree G1 robot, and SMPL-X body skeleton
 - Add root waypoints, paths, full-body keyframes, and hand or foot constraints.
 - Submit generation as a background job, inspect its status, and cancel it.
 - Inspect motion arrays and retrieve generated artifacts.
+- Measure motion diagnostics, review exact frames from three fixed views, and compare candidates side by side.
 - Export supported skeletons as BVH, MuJoCo CSV, or AMASS NPZ.
 - Connect through local stdio or loopback Streamable HTTP.
 - Prepare Blender skeleton exports or animate the registered character with its fitted 24-bone rig.
@@ -106,6 +107,9 @@ This complete path was verified in Blender 5.2.1 and Unreal 5.8.3 using a newly 
 | `get_artifact` | Resolve an output listed in a completed job's manifest. |
 | `inspect_motion` | Check NPZ arrays, skeleton hierarchy, timing, motion bounds, and contact data. |
 | `preview_motion` | Create a local interactive skeleton preview from a completed NPZ artifact. |
+| `analyze_motion_quality` | Measure speed, acceleration, jerk, contact sliding, bone drift, floor proxies, and loop seams with explicit units and thresholds. |
+| `create_motion_review` | Create an offline contact sheet and exact-frame player with three fixed views and labeled diagnostic frames. |
+| `compare_motions` | Compare compatible clips at an explicit frame offset, returning numerical differences and a synchronized review page. |
 | `get_character_profile` | Check the operator-registered character and describe the supported fitted rig. |
 | `prepare_blender_handoff` | Prepare a Blender script for a completed SOMA BVH sample. |
 | `prepare_character_handoff` | Prepare rigging, skinning, and retargeting for the supported character profile. |
@@ -125,3 +129,5 @@ The `kimodo://request-schema` resource exposes the full input schema. The `anima
 [Architecture](docs/architecture.md) explains the process boundary and artifact lifecycle. [Upstream review](docs/upstream-review.md) records the source revision, subsystem map, and limitations used to design this adapter.
 
 [Editor handoffs](docs/editor-handoffs.md) explains the Blender and Unreal workflow, fitted-character scope, unit conversion, and verification limits.
+
+[Motion review](docs/animate-review.md) explains candidate selection, diagnostic limits, deterministic rendering, and the relevant design ideas studied in Animate.

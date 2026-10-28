@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>__REVIEW_TITLE__ · Kimodo Motion</title>
+<style>
+  :root{color-scheme:dark;font-family:ui-sans-serif,system-ui,sans-serif;background:#0b1419;color:#e8f0f1;--muted:#a0b5be;--line:#30434c;--mint:#b0edcf}
+  *{box-sizing:border-box}body{margin:0}button,input,select{font:inherit}button,select{background:#192b34;color:#edf6f5;border:1px solid #40565d;border-radius:7px;padding:8px 13px;cursor:pointer}button:hover{background:#254339}button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #b0edcf;outline-offset:3px}header{border-bottom:1px solid var(--line);padding:22px max(22px,calc((100vw - 1440px)/2));display:flex;justify-content:space-between;align-items:center;gap:18px}.brand{font-size:14px;font-weight:600}.kicker{text-transform:uppercase;letter-spacing:2px;font-size:10px;color:#b0edcf;margin-bottom:8px}.badge{font-size:11px;color:#b0edcf;border:1px solid #355449;border-radius:20px;padding:7px 11px;white-space:nowrap}main{max-width:1484px;margin:auto;padding:32px 22px}h1{font-size:clamp(27px,3vw,38px);letter-spacing:-1.2px;margin:0 0 11px;font-weight:600}h2{font-size:20px;font-weight:550;margin:0 0 12px}h3{font-size:13px;margin:0;font-weight:600;overflow-wrap:anywhere}p{line-height:1.65}.intro{max-width:860px;color:var(--muted);font-size:13px;margin:0 0 23px}.controls{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:15px;background:#13212a;border:1px solid var(--line);border-radius:10px;margin:22px 0 18px}.controls label{font-size:12px;color:var(--muted)}#scrub{flex:1;min-width:140px;accent-color:var(--mint)}#play{background:var(--mint);color:#18322b;min-width:82px;border-color:var(--mint)}#frame-label{font-size:12px;font-variant-numeric:tabular-nums;min-width:190px}.clips{display:grid;grid-template-columns:repeat(var(--clip-count),minmax(0,1fr));gap:16px}.clip{min-width:0;background:#101e26;border:1px solid var(--line);border-radius:11px;overflow:hidden}.clip-head{padding:16px 17px;border-bottom:1px solid var(--line)}.clip-meta{font-size:10px;color:var(--muted);margin-top:7px;font-variant-numeric:tabular-nums}.views{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line)}figure{margin:0;min-width:0;background:#10202a}figcaption{font-size:10px;color:#b7ccd0;padding:10px 12px 0}canvas{display:block;width:100%;height:auto}.frame-note{font-size:11px;padding:11px 16px;color:var(--muted);font-variant-numeric:tabular-nums}.section-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:35px}.section-heading p{font-size:12px;color:var(--muted);margin:0}.sheet{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:18px}.sheet-card{background:#101e26;border:1px solid var(--line);border-radius:9px;overflow:hidden}.sheet-title{display:flex;justify-content:space-between;align-items:center;padding:12px 13px;gap:10px}.sheet-title button{font-size:11px;padding:5px 9px}.sheet-label{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}.reason{color:#a7bfc7;font-size:10px;padding:0 13px 11px;min-height:25px}.sheet-pair{display:grid;grid-template-columns:repeat(var(--clip-count),minmax(0,1fr));gap:1px;background:var(--line)}.sheet-pair>div{min-width:0;background:#10202a}.small-caption{font-size:10px;color:#a6bdc5;padding:8px 10px;overflow-wrap:anywhere}.sheet-canvas{width:100%;height:auto}.evidence{margin-top:29px;border-top:1px solid var(--line);padding-top:18px}summary{cursor:pointer;font-size:13px;color:#c6dadb}pre{font-size:11px;line-height:1.6;color:#afc9d0;white-space:pre-wrap;overflow-wrap:anywhere;background:#101e26;padding:18px;border:1px solid var(--line);border-radius:8px;max-height:500px;overflow:auto}.scope{color:#a1b5bd;font-size:11px}.legend{display:flex;gap:17px;flex-wrap:wrap;margin-top:13px;color:#9eb6be;font-size:11px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}footer{margin:24px 0 3px;color:#819ca6;font-size:10px;line-height:1.8}.keyboard{color:#9eb6be;font-size:10px;margin-top:12px}@media(max-width:950px){.clips{grid-template-columns:1fr}.sheet{grid-template-columns:1fr}}@media(max-width:540px){main{padding:24px 13px}header{padding:18px 13px}.controls{gap:10px}#scrub{flex-basis:50%}#frame-label{width:100%;order:5}.views{grid-template-columns:1fr}.views figure{display:grid;grid-template-columns:85px 1fr;align-items:center}.views canvas{max-height:280px;object-fit:contain}.sheet-pair{grid-template-columns:1fr}.section-heading{align-items:flex-start;flex-direction:column}.badge{font-size:10px}.clip-meta{line-height:1.6}}@media print{body{background:#fff;color:#111}header,.controls,.keyboard,.evidence,#print,.sheet-title button{display:none}main{max-width:none;padding:0}.intro,.scope,footer,.section-heading p{color:#333}.sheet{grid-template-columns:repeat(2,minmax(0,1fr))}.sheet-card,.clip{break-inside:avoid}.sheet-card{margin-bottom:10px}h1{font-size:24px}.section-heading{margin-top:20px}.clips{grid-template-columns:repeat(var(--clip-count),minmax(0,1fr))}.views{grid-template-columns:repeat(3,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<header><div class="brand">Kimodo Motion <span aria-hidden="true"> / </span> Review</div><span class="badge">Offline · exact samples</span></header>
+<main>
+<div class="kicker">See the motion clearly</div><h1>__REVIEW_TITLE__</h1>
+<p class="intro" id="intro"></p>
+<div class="controls" aria-label="Frame controls">
+<button id="play" aria-label="Play exact source frames">Play</button><button id="previous" aria-label="Previous frame">←</button><button id="next" aria-label="Next frame">→</button>
+<label class="sr-only" for="scrub">Source frame</label><input id="scrub" type="range" min="0" max="1" step="1" value="0">
+<output id="frame-label" for="scrub"></output>
+<label for="aspect">View shape</label><select id="aspect"><option value="portrait">Portrait</option><option value="square" selected>Square</option><option value="landscape">Landscape</option></select>
+<button id="print">Print sheet</button>
+</div>
+<div class="clips" id="clips"></div>
+<div class="legend"><span><span class="dot" style="background:#b6efcd"></span>Left side</span><span><span class="dot" style="background:#83c9ed"></span>Right side</span><span><span class="dot" style="background:#f2d998"></span>Root joint</span><span>Orthographic views · meters · +Y up</span></div>
+<div class="keyboard">Keyboard: Space plays or pauses; ← / → step; Home / End go to the first or last available frame. Playback stops at the end.</div>
+<section aria-label="Review contact sheet"><div class="section-heading"><div><div class="kicker">Contact sheet</div><h2>Timeline and diagnostic frames</h2><p>Every tile uses the same source poses and whole-clip bounds as the main view.</p></div><span class="badge" id="sheet-count"></span></div><div class="sheet" id="sheet"></div></section>
+<details class="evidence"><summary>Sources, timing and numerical diagnostics</summary><pre id="evidence"></pre></details>
+<p class="scope">This review shows skeletal samples. It does not show the character mesh, verify skinning, judge prompt adherence or repair animation. Diagnostic extrema identify frames to inspect; they are not a universal quality score.</p>
+<footer>Camera bounds cover every frame and stay fixed during playback. A paired review shares the same camera bounds across both clips. Source frames are zero-based; key span is (samples − 1) / FPS, while sample playback duration is samples / FPS.</footer>
+<p id="status" class="sr-only" role="status" aria-live="polite"></p>
+</main>
+<script id="review-data" type="application/json">__REVIEW_DATA__</script>
+<script>
+'use strict';
+const data=JSON.parse(document.getElementById('review-data').textContent),$=id=>document.getElementById(id);
+const shapes={portrait:[320,500],square:[400,400],landscape:[520,320]};
+document.documentElement.style.setProperty('--clip-count',String(data.clips.length));
+let frame=data.firstFrame,playing=false,epoch=0,epochFrame=0,aspect='square';
+const canvases=[],notes=[],tiles=[];
+const paired=data.clips.length===2;
+const sourceFrame=(f,clip)=>f+(clip===1?data.alignment.offset_frames:0);
+const time=f=>(f/data.fps).toFixed(4)+' s';
+const element=(tag,className,text)=>{const result=document.createElement(tag);if(className)result.className=className;if(text!==undefined)result.textContent=text;return result;};
+$('intro').textContent=paired?`Compare matching rigs at ${data.fps} FPS. Right frame = left frame + ${data.alignment.offset_frames}. ${data.alignment.mode==='root_relative'?'Root translation is removed for display; facing and pose remain unchanged.':'World position is preserved.'} All views share fixed whole-clip framing.`:`Inspect ${data.clips[0].frames} exact source frames at ${data.fps} FPS from three views. Uniform timeline samples and diagnostic frames make changes easier to locate.`;
+$('scrub').min=String(data.firstFrame);$('scrub').max=String(data.lastFrame);
+data.clips.forEach((clip,i)=>{
+ const section=element('section','clip');section.setAttribute('aria-label',(paired?(i?'Right':'Left')+' clip: ':'')+clip.name);
+ const head=element('div','clip-head');head.append(element('h3','',(paired?(i?'B · ':'A · '):'')+clip.name));
+ head.append(element('div','clip-meta',`Sample ${clip.sample} · ${clip.frames} samples · ${(clip.frames/clip.fps).toFixed(4)} s playback · ${((clip.frames-1)/clip.fps).toFixed(4)} s key span`));section.append(head);
+ const views=element('div','views');canvases[i]=[];
+ data.cameras.forEach((camera,v)=>{const figure=element('figure');figure.append(element('figcaption','',camera.name));const canvas=element('canvas');canvas.setAttribute('role','img');canvas.setAttribute('aria-label',camera.name+' skeletal view');figure.append(canvas);views.append(figure);canvases[i][v]=canvas;});
+ section.append(views);const note=element('div','frame-note');notes.push(note);section.append(note);$('clips').append(section);
+});
+function dot(point,basis){return point[0]*basis[0]+point[1]*basis[1]+point[2]*basis[2];}
+function drawView(ctx,clipIndex,f,viewIndex,x,y,width,height){
+ const clip=data.clips[clipIndex],pose=clip.positions[f],camera=data.cameras[viewIndex];
+ ctx.save();ctx.beginPath();ctx.rect(x,y,width,height);ctx.clip();ctx.fillStyle='#10202a';ctx.fillRect(x,y,width,height);
+ const margin=28,spanX=Math.max(camera.maximum[0]-camera.minimum[0],0.05),spanY=Math.max(camera.maximum[1]-camera.minimum[1],0.05);
+ const scale=Math.min((width-2*margin)/spanX,(height-2*margin)/spanY);
+ const center=camera.minimum.map((value,i)=>(value+camera.maximum[i])/2);
+ const project=p=>[x+width/2+(dot(p,camera.basis[0])-center[0])*scale,y+height/2-(dot(p,camera.basis[1])-center[1])*scale];
+ // Screen grid is a stable framing aid. It is not a synthetic ground plane.
+ ctx.strokeStyle='#203641';ctx.lineWidth=1;ctx.beginPath();for(let k=1;k<4;k++){ctx.moveTo(x+width*k/4,y);ctx.lineTo(x+width*k/4,y+height);ctx.moveTo(x,y+height*k/4);ctx.lineTo(x+width,y+height*k/4);}ctx.stroke();
+ const points=pose.map(project);ctx.lineCap='round';
+ clip.parents.forEach((parent,child)=>{if(parent<0)return;const name=clip.names[child].toLowerCase();ctx.strokeStyle=name.includes('left')||name.startsWith('l_')?'#b6efcd':name.includes('right')||name.startsWith('r_')?'#83c9ed':'#d8e7e5';ctx.lineWidth=Math.max(1.8,Math.min(width,height)/140);ctx.beginPath();ctx.moveTo(...points[parent]);ctx.lineTo(...points[child]);ctx.stroke();});
+ const root=clip.parents.indexOf(-1);points.forEach((p,j)=>{ctx.fillStyle=j===root?'#f2d998':'#e5f0eb';ctx.beginPath();ctx.arc(p[0],p[1],j===root?3.6:1.7,0,Math.PI*2);ctx.fill();});
+ ctx.restore();
+}
+function resetCanvas(canvas,width,height){if(canvas.width!==width)canvas.width=width;if(canvas.height!==height)canvas.height=height;const ctx=canvas.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.setLineDash([]);ctx.clearRect(0,0,width,height);return ctx;}
+function drawClip(canvas,clipIndex,f){const width=900,height=360,ctx=resetCanvas(canvas,width,height);data.cameras.forEach((camera,v)=>{drawView(ctx,clipIndex,f,v,v*300,24,300,height-24);ctx.fillStyle='#b7ccd0';ctx.font='11px sans-serif';ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillText(camera.name,v*300+10,16);});}
+function renderFrame(requested){
+ if(!Number.isInteger(requested)||requested<data.firstFrame||requested>data.lastFrame)throw new RangeError('Frame must be an integer in the overlapping source range.');
+ frame=requested;const [width,height]=shapes[aspect];
+ canvases.forEach((views,i)=>{const actual=sourceFrame(frame,i);views.forEach((canvas,v)=>{drawView(resetCanvas(canvas,width,height),i,actual,v,0,0,width,height);canvas.setAttribute('aria-label',`${data.cameras[v].name}: source frame ${actual}, ${time(actual)}`);});notes[i].textContent=`Frame ${actual} / ${data.clips[i].frames-1} · ${time(actual)} · ${data.clips[i].names.length} joints`;});
+ $('scrub').value=String(frame);$('scrub').setAttribute('aria-valuetext',`Source frame ${frame}, ${time(frame)}`);
+ $('frame-label').textContent=`Frame ${frame} / ${data.lastFrame} · ${time(frame)}`;
+ return {frame,sourceFrames:data.clips.map((_,i)=>sourceFrame(frame,i)),times:data.clips.map((_,i)=>sourceFrame(frame,i)/data.fps)};
+}
+function setPlaying(value){playing=value;epoch=performance.now();epochFrame=frame;$('play').textContent=value?'Pause':'Play';$('play').setAttribute('aria-label',value?'Pause playback':'Play exact source frames');$('status').textContent=value?'Playing source frames':'Paused';}
+function go(target){setPlaying(false);renderFrame(Math.max(data.firstFrame,Math.min(data.lastFrame,target)));}
+data.reviewFrames.forEach(item=>{
+ const card=element('article','sheet-card'),head=element('div','sheet-title');head.append(element('span','sheet-label',`Frame ${item.frame} · ${time(item.frame)}`));const jump=element('button','','Inspect frame');jump.setAttribute('aria-label',`Inspect source frame ${item.frame}`);jump.addEventListener('click',()=>{go(item.frame);$('scrub').focus();});head.append(jump);card.append(head);card.append(element('div','reason',item.reasons.join(' · ')));
+ const pair=element('div','sheet-pair');data.clips.forEach((clip,i)=>{const cell=element('div');const actual=sourceFrame(item.frame,i);cell.append(element('div','small-caption',`${paired?(i?'B':'A')+' · ':''}frame ${actual} · ${time(actual)}`));const canvas=element('canvas','sheet-canvas');canvas.setAttribute('role','img');canvas.setAttribute('aria-label',`Three skeletal views of ${clip.name}, frame ${actual}`);cell.append(canvas);pair.append(cell);drawClip(canvas,i,actual);tiles.push({canvas,clip:i,frame:actual});});card.append(pair);$('sheet').append(card);
+});
+$('sheet-count').textContent=`${data.reviewFrames.length} selected frames`;
+const evidence={schema_version:data.schemaVersion,alignment:data.alignment,sources:data.clips.map(c=>({name:c.name,sha256:c.sourceSha256,sample:c.sample,frames:c.frames,fps:c.fps,skeleton:c.skeleton,sample_duration_seconds:c.frames/c.fps,key_span_seconds:(c.frames-1)/c.fps})),camera_bounds:data.cameras,diagnostics:data.diagnostics};
+$('evidence').textContent=JSON.stringify(evidence,null,2);
+$('play').addEventListener('click',()=>{if(!playing&&frame===data.lastFrame)renderFrame(data.firstFrame);setPlaying(!playing);});
+$('previous').addEventListener('click',()=>go(frame-1));$('next').addEventListener('click',()=>go(frame+1));$('scrub').addEventListener('input',event=>go(Number(event.target.value)));
+$('aspect').addEventListener('change',event=>{aspect=event.target.value;renderFrame(frame);});$('print').addEventListener('click',()=>window.print());
+document.addEventListener('keydown',event=>{if(event.target.matches('input,select,button,summary'))return;if(event.key===' '){event.preventDefault();setPlaying(!playing);}else if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();go(event.key==='Home'?data.firstFrame:event.key==='End'?data.lastFrame:frame+(event.key==='ArrowRight'?1:-1));}});
+function tick(now){if(playing){const next=Math.min(data.lastFrame,epochFrame+Math.floor((now-epoch)*data.fps/1000));if(next!==frame)renderFrame(next);if(next===data.lastFrame)setPlaying(false);}requestAnimationFrame(tick);}
+const query=new URLSearchParams(location.search),initial=query.has('frame')?Number(query.get('frame')):data.firstFrame;
+if(query.has('aspect')&&Object.hasOwn(shapes,query.get('aspect'))){aspect=query.get('aspect');$('aspect').value=aspect;}
+renderFrame(Number.isInteger(initial)&&initial>=data.firstFrame&&initial<=data.lastFrame?initial:data.firstFrame);
+window.renderFrame=renderFrame;window.renderReviewCard=(index)=>{const tile=tiles[index];if(!tile)throw new RangeError('Unknown contact-sheet tile.');drawClip(tile.canvas,tile.clip,tile.frame);return tile.canvas;};window.reviewData=data;window.reviewReady=true;requestAnimationFrame(tick);
+</script>
+</body>
+</html>
