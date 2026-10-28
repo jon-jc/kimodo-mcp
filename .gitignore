@@ -23,3 +23,5 @@ AGENTS.md
 CLAUDE.md
 *_analysis.txt
 *_coverage.txt
+node_modules/
+src/kimodo_mcp/studio_web/

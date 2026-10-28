@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from kimodo_mcp.pose import _matrix_to_axis_angle, _soma_layout, extract_pose_constraint
+from kimodo_mcp.pose import _matrix_to_axis_angle, _soma_layout, anchor_start, extract_pose_constraint
 from kimodo_mcp.schemas import GenerateRequest
 
 
@@ -123,3 +123,61 @@ def test_limb_constraint_and_request_conflict_checks(tmp_path):
                 {"type": "root2d", "frame_indices": [0], "smooth_root_2d": [[0.0, 0.0]]},
             ],
         )
+
+
+def single_pose(path, joints=77, **changes):
+    names, _ = _soma_layout(joints)
+    positions = np.zeros((3, joints, 3))
+    positions[:, 0] = [2, 1, -4]
+    positions[:, names.index("RightLeg")] = [1.8, 0.9, -3.8]
+    positions[:, names.index("LeftLeg")] = [2, 0.9, -4]
+    data = dict(posed_joints=positions, local_rot_mats=np.broadcast_to(np.eye(3), (3, joints, 3, 3)))
+    data.update(changes)
+    return fixture(path, joints, **data)
+
+
+@pytest.mark.parametrize("joints", [30, 77])
+def test_start_anchor_payload_heading_world_root_and_immutability(tmp_path, joints):
+    path = single_pose(tmp_path / "source.npz", joints)
+    contents = path.read_bytes()
+    request = GenerateRequest(segments=[{"text": "Wave gently", "duration": 2}], seed=42, steps=20)
+    original = request.model_dump(mode="json")
+    result = anchor_start(request, path, 2)
+    assert result.first_heading_angle == pytest.approx(np.pi / 4)
+    assert [c.type for c in result.constraints] == [
+        "fullbody",
+        "left-hand",
+        "right-hand",
+        "left-foot",
+        "right-foot",
+    ]
+    for constraint in result.constraints:
+        assert constraint.frame_indices == [0]
+        assert constraint.root_positions == [[2, 1, -4]]
+        assert len(constraint.local_joints_rot[0]) == joints
+    changed = result.model_dump(mode="json")
+    assert {key for key in changed if changed[key] != original[key]} == {"constraints", "first_heading_angle"}
+    GenerateRequest.model_validate(changed)
+    assert request.model_dump(mode="json") == original and path.read_bytes() == contents
+    with pytest.raises(ValueError, match="existing constraints"):
+        anchor_start(result, path, 2)
+
+
+def test_start_anchor_rejects_non_soma_target_and_inconsistent_source_model(tmp_path):
+    path = single_pose(tmp_path / "source.npz")
+    request = GenerateRequest(model="kimodo-g1-rp", segments=[{"text": "Wave", "duration": 2}])
+    with pytest.raises(ValueError, match="SOMA"):
+        anchor_start(request, path, 0)
+    bad = single_pose(tmp_path / "bad-model.npz", model=np.array("kimodo-g1-rp"))
+    request = GenerateRequest(segments=[{"text": "Wave", "duration": 2}])
+    with pytest.raises(ValueError, match="SOMA"):
+        anchor_start(request, bad, 0)
+
+
+def test_start_anchor_rejects_ambiguous_heading_or_multiple_samples(tmp_path):
+    request = GenerateRequest(segments=[{"text": "Wave", "duration": 2}])
+    with pytest.raises(ValueError, match="individual sample"):
+        anchor_start(request, fixture(tmp_path / "batch.npz"), 0)
+    path = single_pose(tmp_path / "flat.npz", posed_joints=np.zeros((3, 77, 3)))
+    with pytest.raises(ValueError, match="heading"):
+        anchor_start(request, path, 0)

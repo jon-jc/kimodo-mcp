@@ -9,7 +9,7 @@ description = "Local Model Context Protocol bridge for Kimodo motion generation"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["mcp>=1.28,<2", "pydantic>=2.11,<3", "numpy>=1.26,<3", "filelock>=3.20.3"]
+dependencies = ["mcp>=1.28,<2", "pydantic>=2.11,<3", "numpy>=1.26,<3", "filelock>=3.20.3", "starlette>=0.48,<2", "uvicorn>=0.30,<1"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.11"]
@@ -17,6 +17,10 @@ dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.11"]
 [project.scripts]
 kimodo-mcp = "kimodo_mcp.server:main"
 kimodo-mcp-worker = "kimodo_mcp.worker_service:main"
+kimodo-studio = "kimodo_mcp.studio:main"
+
+[tool.hatch.build]
+artifacts = ["src/kimodo_mcp/studio_web/**"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kimodo_mcp"]

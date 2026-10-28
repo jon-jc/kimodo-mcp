@@ -22,6 +22,14 @@ Candidates = Annotated[StrictInt, Field(ge=1, le=4)]
 Beats = Annotated[list[PromptSegment], Field(min_length=1, max_length=8)]
 
 
+class PoseReference(StrictModel):
+    """A selected frame from one completed, managed job sample."""
+
+    job_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$", min_length=32, max_length=32, strict=True)]
+    sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0
+    frame: Annotated[StrictInt, Field(ge=0, le=2399)]
+
+
 def clean_description(value: str) -> str:
     return PromptSegment(text=value, duration=1.0).text
 

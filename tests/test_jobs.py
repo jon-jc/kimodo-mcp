@@ -1,4 +1,5 @@
 import json
+import sqlite3
 import sys
 import threading
 import time
@@ -26,6 +27,32 @@ def test_shared_store_and_cancel_preserves_terminal_state(store):
     assert store.get(job["id"])["status"] == "cancelled"
     other.cancel(job["id"])
     assert store.get(job["id"])["status"] == "cancelled"
+
+
+def test_connection_commits_then_closes_and_releases_file_handle(store):
+    with store.connect() as connection:
+        connection.execute("CREATE TABLE close_probe (value INTEGER)")
+        connection.execute("INSERT INTO close_probe VALUES (7)")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+    with store.connect() as check:
+        assert check.execute("SELECT value FROM close_probe").fetchone()[0] == 7
+    renamed = store.db.with_name("released.sqlite3")
+    store.db.replace(renamed)
+    renamed.unlink()
+    assert not renamed.exists()
+
+
+def test_failed_transaction_rolls_back_and_closes(store):
+    job = store.submit({}, launch=False)
+    with pytest.raises(RuntimeError, match="abort"):
+        with store.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("UPDATE jobs SET status='failed' WHERE id=?", (job["id"],))
+            raise RuntimeError("abort")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        connection.execute("SELECT 1")
+    assert store.get(job["id"])["status"] == "queued"
 
 
 def test_runner_requires_manifest(store):

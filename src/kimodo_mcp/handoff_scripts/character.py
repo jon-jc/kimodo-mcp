@@ -389,6 +389,38 @@ def export_character(scene, rig, meshes, output_fbx, animated=True):
         bpy.context.window.scene = previous
 
 
+def export_character_preview(scene, rig, meshes, output_glb):
+    """Save one self-contained skinned animation for the local review viewer."""
+    import bpy
+
+    output_glb = Path(output_glb).resolve()
+    if output_glb.exists():
+        raise FileExistsError("Character preview already exists; refusing to overwrite it")
+    previous = bpy.context.window.scene
+    frame = scene.frame_current
+    try:
+        bpy.context.window.scene = scene
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in [rig] + meshes:
+            obj.select_set(True)
+        bpy.context.view_layer.objects.active = rig
+        scene.frame_set(scene.frame_start)
+        result = bpy.ops.export_scene.gltf(
+            filepath=str(output_glb), export_format="GLB", check_existing=False,
+            use_selection=True, use_active_scene=True, export_yup=True,
+            export_skins=True, export_def_bones=False, export_materials="EXPORT",
+            export_animations=True, export_animation_mode="SCENE",
+            export_frame_range=True, export_frame_step=1, export_force_sampling=True,
+            export_anim_slide_to_zero=True, export_optimize_animation_size=False,
+            export_rest_position_armature=True,
+        )
+        if "FINISHED" not in result or not output_glb.is_file() or output_glb.stat().st_size < 20:
+            raise RuntimeError("Blender did not export the animated character GLB")
+    finally:
+        scene.frame_set(frame)
+        bpy.context.window.scene = previous
+
+
 def main(argv=None):
     """Blender CLI entry point; all paths are assigned by the local operator."""
     import argparse
@@ -502,6 +534,7 @@ def run():
         "animation.fbx",
         "character.fbx",
         "character.blend",
+        "character-preview.glb",
         "blender-report.json",
         "rig-report.json",
         "motion-report.json",
@@ -513,6 +546,12 @@ def run():
 
     if bpy.context.mode != "OBJECT":
         raise RuntimeError("Leave Edit/Pose mode before running the handoff")
+    # Check global naming and exporter availability before creating any scene.
+    # Existing user objects are never renamed to make room for this exporter.
+    if bpy.data.objects.get("Armature") is not None:
+        raise RuntimeError("An existing object named Armature prevents deterministic Unreal export")
+    bpy.ops.export_scene.gltf.get_rna_type()
+    bpy.ops.export_scene.fbx.get_rna_type()
     with (directory / "execution.lock").open("x", encoding="utf-8") as marker:
         marker.write(str(motion))
     scene, rig, meshes, rig_report = build_character(character, directory)
@@ -527,6 +566,7 @@ def run():
                     node.image.pack()
     export_character(scene, rig, meshes, directory / "character.fbx", False)
     export_character(scene, rig, [], directory / "animation.fbx", True)
+    export_character_preview(scene, rig, meshes, directory / "character-preview.glb")
     bpy.data.libraries.write(str(directory / "character.blend"), {scene}, fake_user=True, compress=True)
     bones = [{"name": b.name, "parent": b.parent.name if b.parent else None} for b in rig.data.bones]
     report = {
@@ -551,6 +591,8 @@ def run():
         "character_fbx_sha256": hashlib.sha256((directory / "character.fbx").read_bytes()).hexdigest(),
         "blend_path": str(directory / "character.blend"),
         "blend_sha256": hashlib.sha256((directory / "character.blend").read_bytes()).hexdigest(),
+        "preview_glb_path": str(directory / "character-preview.glb"),
+        "preview_glb_sha256": hashlib.sha256((directory / "character-preview.glb").read_bytes()).hexdigest(),
         "units": "meters",
         "fbx_units": "centimeters",
         "fbx_forward": "-Y",
