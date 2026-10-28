@@ -87,6 +87,14 @@ Choose either stdio or HTTP for a client entry named `kimodo`.
 
 Keep this endpoint on loopback. This adapter does not provide a multi-user authorization service or a production remote deployment. Local stdio is usually easier because the client starts and stops the bridge process.
 
+## Blender and Unreal connections
+
+Configure `kimodo`, `blender`, and `unreal` as separate MCP entries in each client. Kimodo prepares motion and checked handoff scripts; the editor connections operate their respective applications. Registering Kimodo alone does not install either editor connector. Verify all three entries in the client's MCP status and verify the open scene or project before executing a handoff.
+
+The fitted-character workflow also requires an operator-selected source FBX. Set `KIMODO_CHARACTER_FBX`, or create `character/target.json` inside the configured data directory with `schema_version: 1` and an absolute `source_fbx` path. The supported profile checks the source's exact content hash; choosing another character file does not automatically fit a new rig. Keep this registration and the original assets outside the repository.
+
+An Unreal connector may expose native import operations without a general Python executor. In that case, execute the prepared script through the editor's Python facility, or use native import tools and verify the same rig, scale, timing, and asset paths. A native connector's tool response does not create the prepared script's report automatically; do not claim that script completed unless its managed report exists.
+
 ## Troubleshooting
 
 | Symptom | Check |

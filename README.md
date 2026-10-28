@@ -13,6 +13,8 @@ Kimodo produces motion on SOMA human, Unitree G1 robot, and SMPL-X body skeleton
 - Inspect motion arrays and retrieve generated artifacts.
 - Export supported skeletons as BVH, MuJoCo CSV, or AMASS NPZ.
 - Connect through local stdio or loopback Streamable HTTP.
+- Prepare Blender skeleton exports or animate the registered character with its fitted 24-bone rig.
+- Import animations into an explicit open Unreal project and matching existing skeleton, with a checked completion report.
 
 ## Install the bridge
 
@@ -48,6 +50,7 @@ Follow [client setup](docs/clients.md) for Codex, Claude Code, Claude Desktop, a
 | `HF_HOME` | Optional external Hugging Face cache directory. |
 | `KIMODO_ALLOW_DOWNLOADS` | Set to `1` to allow first-run model downloads; default is offline. |
 | `KIMODO_JOB_TIMEOUT` | Maximum seconds waiting for a generation slot and maximum execution seconds; default `3600`. |
+| `KIMODO_UNREAL_ENGINE` | Optional Unreal installation root, such as `D:\Tools\UE_5.8`, for executing prepared editor handoffs. |
 
 Start a local stdio server with the bridge environment's Python:
 
@@ -85,6 +88,10 @@ Ask your assistant:
 
 For a longer scene, describe self-contained segments of at most 10 seconds each. See [animation workflows](docs/animation-workflows.md) for coordinates, constraints, examples, and export choices.
 
+For the supported fitted character, prepare and execute its Blender handoff, import the exported skeletal mesh into Unreal, then call `prepare_unreal_handoff` and `execute_unreal_handoff` with the actual project, mesh, and Skeleton paths. The execution tool uses Unreal's installed Python transport and accepts only the bridge's fixed, verified handoff script. [Editor setup and handoffs](docs/editor-handoffs.md) covers the required loopback settings.
+
+This complete path was verified in Blender 5.2.1 and Unreal 5.8.3 using a newly generated waving motion: the saved Unreal animation has 24 bone tracks and 120 sampled keys at 30 FPS. Native Unreal MCP independently confirmed the matching skeleton and saved asset. This establishes import and timing correctness; visual refinement and gameplay acceptance remain separate.
+
 ## MCP tools
 
 | Tool | Purpose |
@@ -99,6 +106,13 @@ For a longer scene, describe self-contained segments of at most 10 seconds each.
 | `get_artifact` | Resolve an output listed in a completed job's manifest. |
 | `inspect_motion` | Check NPZ arrays, skeleton hierarchy, timing, motion bounds, and contact data. |
 | `preview_motion` | Create a local interactive skeleton preview from a completed NPZ artifact. |
+| `get_character_profile` | Check the operator-registered character and describe the supported fitted rig. |
+| `prepare_blender_handoff` | Prepare a Blender script for a completed SOMA BVH sample. |
+| `prepare_character_handoff` | Prepare rigging, skinning, and retargeting for the supported character profile. |
+| `get_handoff_report` | Read the managed Blender export and deformation report. |
+| `prepare_unreal_handoff` | Prepare animation import using explicit project, mesh, skeleton, and destination paths. |
+| `execute_unreal_handoff` | Execute the verified prepared script in exactly the matching local Unreal editor and return its saved-asset receipt. |
+| `get_unreal_report` | Read the managed Unreal import's timing and skeleton verification report. |
 
 The `kimodo://request-schema` resource exposes the full input schema. The `animation_workflow` prompt guides an assistant through validation and generation. Files in `examples/` are complete arguments for `validate_motion` or `generate_motion`.
 
@@ -109,3 +123,5 @@ The `kimodo://request-schema` resource exposes the full input schema. The `anima
 ```
 
 [Architecture](docs/architecture.md) explains the process boundary and artifact lifecycle. [Upstream review](docs/upstream-review.md) records the source revision, subsystem map, and limitations used to design this adapter.
+
+[Editor handoffs](docs/editor-handoffs.md) explains the Blender and Unreal workflow, fitted-character scope, unit conversion, and verification limits.

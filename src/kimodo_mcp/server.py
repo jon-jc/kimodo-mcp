@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import subprocess
-from typing import Annotated, Any
+from pathlib import Path
+from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -15,7 +18,11 @@ from .artifacts import create_preview
 from .artifacts import inspect_motion as inspect_archive
 from .catalog import list_models
 from .config import UPSTREAM_REVISION, Settings
-from .jobs import JobStore, redact
+from .handoff import UnrealTarget
+from .handoff import prepare_blender_handoff as prepare_blender_files
+from .handoff import prepare_character_handoff as prepare_character_files
+from .handoff import prepare_unreal_handoff as prepare_unreal_files
+from .jobs import JobStore, contained_file, redact
 from .schemas import GenerateRequest
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
@@ -128,6 +135,173 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
         target = store.directory(job_id) / (name.removesuffix(".npz") + "_preview.html")
         return create_preview(artifact["absolute_path"], target)
 
+    def handoff_directory(job_id: str, source_kind: str, sample_index: int, attempt: int = 0) -> Path:
+        job = store.get(job_id)
+        if job["status"] != "completed" or sample_index >= job["manifest"]["samples"]:
+            raise ValueError("Choose a sample from a completed generation job")
+        base = store.directory(job_id)
+        suffix = f"-attempt{attempt:02d}" if attempt else ""
+        directory = (base / "handoffs" / f"{source_kind}-motion_{sample_index:02d}{suffix}").resolve()
+        if not directory.is_relative_to(base.resolve()):
+            raise ValueError("Handoff directory escapes its job storage")
+        return directory
+
+    def configured_character() -> Path | None:
+        explicit = os.environ.get("KIMODO_CHARACTER_FBX")
+        if explicit:
+            return Path(explicit).resolve()
+        registration = settings.data_dir / "character" / "target.json"
+        if not registration.is_file():
+            return None
+        if registration.stat().st_size > 8192:
+            raise ValueError("Character registration exceeds its size limit")
+        value = json.loads(registration.read_text(encoding="utf-8"))
+        path = Path(value["source_fbx"])
+        if not path.is_absolute():
+            raise ValueError("Character registration must use an absolute FBX path")
+        return path.resolve()
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_character_profile() -> dict[str, Any]:
+        """Inspect the operator-configured fitted-character profile without loading Blender."""
+        from .handoff_scripts.character import SOURCE_SHA256, validate_target
+
+        path = configured_character()
+        if path is None:
+            return {"configured": False, "setup": "Set KIMODO_CHARACTER_FBX to the supported source FBX."}
+        validate_target(path)
+        return {
+            "configured": True, "source_fbx": str(path), "source_sha256": SOURCE_SHA256,
+            "profile": "Fitted humanoid rig for the supplied static character", "bones": 24,
+            "limitations": ["Asset-specific fit", "No facial or finger animation", "No cloth or hair physics"],
+        }
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def prepare_character_handoff(
+        job_id: str, sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
+        attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+    ) -> dict[str, Any]:
+        """Prepare Blender rigging, skinning and motion retargeting for the configured character.
+
+        Uses the inspected source's exact checksum. Saves a separate rigged mesh, animation FBX,
+        .blend, and verification report. Execute the returned script through Blender MCP.
+        """
+        character = configured_character()
+        if character is None:
+            raise ValueError("Configure a supported character first; see get_character_profile")
+        artifact = store.artifact(job_id, f"motion_{sample_index:02d}.npz")
+        manifest = store.get(job_id)["manifest"]
+        result = prepare_character_files(
+            character, Path(artifact["absolute_path"]),
+            handoff_directory(job_id, "character", sample_index, attempt),
+            source_sha256=artifact["sha256"], fps=manifest["fps"], frames=manifest["frames"],
+            sample_index=sample_index,
+        )
+        return result.model_dump()
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def prepare_blender_handoff(
+        job_id: str, sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
+        attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+    ) -> dict[str, Any]:
+        """Prepare a trusted Blender script to import a generated SOMA BVH and save .blend/FBX."""
+        artifact = store.artifact(job_id, f"motion_{sample_index:02d}.bvh")
+        manifest = store.get(job_id)["manifest"]
+        result = prepare_blender_files(
+            Path(artifact["absolute_path"]), handoff_directory(job_id, "skeleton", sample_index, attempt),
+            fps=manifest["fps"], frames=manifest["frames"],
+            source_sha256=artifact["sha256"], skeleton=manifest["skeleton"],
+        )
+        return result.model_dump()
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_handoff_report(
+        job_id: str, source_kind: Literal["skeleton", "character"] = "skeleton",
+        sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
+        attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+    ) -> dict[str, Any]:
+        """Read the Blender execution report for a managed skeleton or fitted-character handoff."""
+        directory = handoff_directory(job_id, source_kind, sample_index, attempt)
+        path = directory / "blender-report.json"
+        if not path.is_file():
+            status = "not_completed" if (directory / "execution.lock").exists() else "not_executed"
+            return {"status": status, "report_path": str(path)}
+        path = contained_file(directory, "blender-report.json")
+        if path.stat().st_size > 1_000_000:
+            raise ValueError("Handoff report exceeds its size limit")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def prepare_unreal_handoff(
+        job_id: str, target: UnrealTarget,
+        source_kind: Literal["skeleton", "character"] = "skeleton",
+        sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
+        attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+    ) -> dict[str, Any]:
+        """Prepare animation-only Unreal import after Blender reports a verified FBX export.
+
+        The editor checks the exact project and matching rig hierarchy before creating an asset.
+        Import the rigged character mesh first, then use execute_unreal_handoff.
+        """
+        source = handoff_directory(job_id, source_kind, sample_index, attempt)
+        key = hashlib.sha256(target.model_dump_json().encode()).hexdigest()[:16]
+        report = contained_file(source, "blender-report.json")
+        output = (source / f"unreal-{key}").resolve()
+        if not output.is_relative_to(source.resolve()):
+            raise ValueError("Unreal handoff directory escapes its managed source")
+        result = prepare_unreal_files(report, output, target=target)
+        return result.model_dump()
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def execute_unreal_handoff(
+        job_id: str, target: UnrealTarget,
+        source_kind: Literal["skeleton", "character"] = "skeleton",
+        sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
+        attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+    ) -> dict[str, Any]:
+        """Import a prepared animation into its exact open Unreal project and verify the saved asset.
+
+        Requires the operator's engine registration and loopback Python remote execution.
+        Executes only the bundled handoff script. A completed matching receipt is reused.
+        """
+        from .unreal_bridge import execute_handoff
+
+        engine = os.environ.get("KIMODO_UNREAL_ENGINE")
+        if not engine:
+            registration = settings.data_dir / "Unreal" / "engine.json"
+            if not registration.is_file() or registration.stat().st_size > 8192:
+                raise ValueError("Set KIMODO_UNREAL_ENGINE to the Unreal installation directory")
+            engine = json.loads(registration.read_text(encoding="utf-8"))["engine_directory"]
+        engine_path = Path(engine)
+        if not engine_path.is_absolute():
+            raise ValueError("Unreal engine registration must use an absolute path")
+        source = handoff_directory(job_id, source_kind, sample_index, attempt)
+        key = hashlib.sha256(target.model_dump_json().encode()).hexdigest()[:16]
+        script = contained_file(source, f"unreal-{key}/unreal_handoff.py")
+        return execute_handoff(script, engine_path, Path(target.project_file))
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_unreal_report(
+        job_id: str, target: UnrealTarget,
+        source_kind: Literal["skeleton", "character"] = "skeleton",
+        sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
+        attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+    ) -> dict[str, Any]:
+        """Read a managed Unreal import's final timing, rig and asset-path verification report."""
+        source = handoff_directory(job_id, source_kind, sample_index, attempt)
+        key = hashlib.sha256(target.model_dump_json().encode()).hexdigest()[:16]
+        directory = (source / f"unreal-{key}").resolve()
+        if not directory.is_relative_to(source.resolve()):
+            raise ValueError("Unreal handoff directory escapes its managed source")
+        path = directory / "unreal-report.json"
+        if not path.is_file():
+            status = "not_completed" if (directory / "execution.lock").exists() else "not_executed"
+            return {"status": status, "report_path": str(path)}
+        path = contained_file(directory, "unreal-report.json")
+        if path.stat().st_size > 1_000_000:
+            raise ValueError("Handoff report exceeds its size limit")
+        return json.loads(path.read_text(encoding="utf-8"))
+
     @mcp.resource("kimodo://models")
     def model_resource() -> str:
         return json.dumps(list_models(), indent=2)
@@ -150,7 +324,12 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
             "3. Use validate_motion. Ask for missing artistic decisions only when necessary.\n"
             "4. Call generate_motion and poll get_job; use get_job_log on failure.\n"
             "5. Call inspect_motion and preview_motion on a completed NPZ, then get_artifact for exports.\n"
-            "SOMA BVH can animate an imported skeleton in Blender; retargeting a custom mesh is a separate step."
+            "6. For a skeleton use prepare_blender_handoff; for a configured fitted character use "
+            "prepare_character_handoff. Run the returned trusted script through Blender MCP and check get_handoff_report.\n"
+            "7. Import the character mesh into Unreal first, then prepare_unreal_handoff with its exact project, "
+            "Skeleton and SkeletalMesh paths. Use execute_unreal_handoff, check get_unreal_report, "
+            "then inspect the imported animation through Unreal MCP.\n"
+            "Different rigs require retargeting; never attach SOMA animation directly to an unrelated skeleton."
         )
 
     return mcp
