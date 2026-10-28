@@ -1,0 +1,17 @@
+{
+  "request": {
+    "model": "kimodo-soma-rp-v1.2",
+    "segments": [
+      {
+        "text": "A person walks forward at a relaxed pace and waves with their right hand.",
+        "duration": 5.0
+      }
+    ],
+    "seed": 42,
+    "samples": 1,
+    "steps": 50,
+    "postprocess": true,
+    "formats": ["npz", "bvh"],
+    "bvh_standard_tpose": true
+  }
+}

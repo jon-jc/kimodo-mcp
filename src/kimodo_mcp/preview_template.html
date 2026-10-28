@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>__MOTION_TITLE__ · Kimodo Motion</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; color: #edf6f5; background: #081113; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+    button, select, input { font: inherit; }
+    button, select { border: 1px solid #334b4d; border-radius: 8px; color: #e7f1f1; background: #14282c; padding: 9px 14px; cursor: pointer; }
+    button:hover, select:hover { border-color: #76d1be; background: #1a3539; }
+    button:focus-visible, select:focus-visible, input:focus-visible, canvas:focus-visible, summary:focus-visible { outline: 3px solid #a0eac8; outline-offset: 3px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 27px 34px 22px; border-bottom: 1px solid #213235; }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .mark { width: 37px; height: 37px; display: grid; place-items: center; border: 1px solid #6abfab; border-radius: 12px; color: #a8f1cc; font-size: 23px; }
+    h1 { font-size: 19px; letter-spacing: -.4px; margin: 0; font-weight: 650; }
+    .eyebrow { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; color: #96b8b4; margin-bottom: 5px; }
+    .offline { font-size: 11px; color: #a7c8c1; white-space: nowrap; }
+    .offline::before { content: ''; display: inline-block; height: 6px; width: 6px; background: #9cebc5; border-radius: 50%; margin-right: 8px; }
+    main { max-width: 1500px; margin: auto; padding: 25px 34px 20px; }
+    .heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 19px; }
+    h2 { margin: 0 0 7px; font-size: 26px; font-weight: 550; letter-spacing: -1px; overflow-wrap: anywhere; }
+    .muted { color: #93b0b0; font-size: 12px; line-height: 1.6; }
+    .stats { display: flex; gap: 30px; flex-shrink: 0; }
+    .stat strong { font-size: 20px; font-weight: 550; font-variant-numeric: tabular-nums; display: block; margin-bottom: 3px; }
+    .stat span { color: #93b0b0; text-transform: uppercase; font-size: 9px; letter-spacing: 1.5px; }
+    .stage { position: relative; border: 1px solid #2a4145; border-radius: 14px; background: radial-gradient(ellipse at 50% 38%, #173239 0%, #10242b 42%, #0b1a20 100%); overflow: hidden; }
+    canvas { display: block; width: 100%; height: min(57vh, 630px); min-height: 310px; cursor: grab; touch-action: none; }
+    canvas:active { cursor: grabbing; }
+    .stage-top { position: absolute; top: 19px; left: 21px; right: 21px; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; pointer-events: none; }
+    .tag { font-size: 10px; letter-spacing: 1.2px; text-transform: uppercase; color: #acd9cf; background: #0a191ec9; border: 1px solid #2c4c50; border-radius: 6px; padding: 7px 10px; }
+    .views { pointer-events: auto; display: flex; padding: 3px; background: #08151bc9; border: 1px solid #2c464a; border-radius: 8px; }
+    .views button { font-size: 11px; border: 0; background: transparent; padding: 6px 10px; color: #9fb9bb; }
+    .views button[aria-pressed="true"] { color: #d3fff0; background: #245044; }
+    .stage-bottom { position: absolute; bottom: 16px; left: 21px; right: 21px; display: flex; justify-content: space-between; pointer-events: none; gap: 10px; font-size: 10px; color: #8ea9ac; }
+    .frame-time { font-variant-numeric: tabular-nums; color: #c4e0db; }
+    .transport { margin-top: 13px; border: 1px solid #263c40; border-radius: 12px; padding: 16px 19px; background: #0d1d21; }
+    .transport-row { display: flex; align-items: center; gap: 13px; }
+    #play { min-width: 91px; background: #a7ecc6; color: #0b2c25; border-color: #a7ecc6; font-size: 12px; font-weight: 650; }
+    #play:hover { background: #c1f9d9; }
+    #scrub { min-width: 40px; flex: 1; accent-color: #a7ecc6; cursor: pointer; }
+    .control-label { color: #95b1b2; font-size: 11px; display: flex; align-items: center; gap: 8px; }
+    select { padding: 6px 9px; font-size: 11px; }
+    .transport-meta { display: flex; justify-content: space-between; gap: 15px; margin-top: 14px; font-size: 10px; color: #8ca9a9; }
+    .check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+    .check input { accent-color: #a7ecc6; }
+    .options { display: flex; gap: 18px; }
+    details { margin-top: 18px; padding: 15px 0; border-top: 1px solid #213639; }
+    summary { cursor: pointer; font-size: 12px; color: #abc4c0; }
+    .details-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin: 20px 0 13px; }
+    .detail { padding: 14px 16px; background: #0d1c20; border: 1px solid #21363a; border-radius: 8px; }
+    .detail strong { display: block; font-size: 16px; font-weight: 500; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+    .detail span { color: #8faeae; font-size: 10px; }
+    #warnings { margin: 12px 0 0; color: #e8ce96; font-size: 11px; line-height: 1.8; padding-left: 18px; }
+    footer { font-size: 10px; color: #6e9193; padding: 5px 0 12px; display: flex; justify-content: space-between; gap: 14px; line-height: 1.7; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+    @media(max-width: 780px) { header { padding: 20px; } main { padding: 22px 18px; } .heading { display: block; } .stats { margin-top: 18px; gap: 28px; } .transport-row { flex-wrap: wrap; } #scrub { min-width: calc(100% - 120px); } .transport-meta { flex-wrap: wrap; } .stage-bottom .hint { display: none; } .details-grid { grid-template-columns: 1fr; gap: 8px; } .stage-top { left: 12px; right: 12px; } .tag { max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } footer { display: block; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand"><div class="mark" aria-hidden="true">⌁</div><div><div class="eyebrow">Animation workspace</div><h1>Kimodo Motion</h1></div></div>
+    <div class="offline">Offline preview</div>
+  </header>
+  <main>
+    <div class="heading">
+      <div><div class="eyebrow">Motion study</div><h2 id="title">__MOTION_TITLE__</h2><div class="muted" id="subtitle"></div></div>
+      <div class="stats"><div class="stat"><strong id="duration"></strong><span>Seconds</span></div><div class="stat"><strong id="frame-count"></strong><span>Frames</span></div><div class="stat"><strong id="joint-count"></strong><span>Joints</span></div></div>
+    </div>
+    <div class="stage">
+      <canvas id="canvas" tabindex="0" aria-label="Interactive 3D skeletal animation. Drag to orbit, scroll to zoom; use the view buttons and playback controls below."></canvas>
+      <div class="stage-top"><span class="tag" id="skeleton-tag"></span><div class="views" aria-label="Camera views"><button data-view="orbit" aria-pressed="true">3D</button><button data-view="front" aria-pressed="false">Front</button><button data-view="side" aria-pressed="false">Side</button><button data-view="top" aria-pressed="false">Top</button></div></div>
+      <div class="stage-bottom"><span class="hint">Drag to orbit · Scroll to zoom</span><span id="frame-time" class="frame-time"></span></div>
+    </div>
+    <section class="transport" aria-label="Animation playback controls">
+      <div class="transport-row"><button id="play" aria-label="Play animation">▶ Play</button><label for="scrub" class="sr-only">Animation frame</label><input id="scrub" type="range" min="0" max="1" step="1" value="0"><label class="control-label">Speed<select id="speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label><label class="control-label">Sample<select id="sample"></select></label></div>
+      <div class="transport-meta"><div class="options"><label class="check"><input id="show-path" type="checkbox" checked>Root path</label><label class="check"><input id="follow" type="checkbox">Follow root</label><label class="check"><input id="loop" type="checkbox" checked>Loop</label></div><span id="sampling-note"></span></div>
+    </section>
+    <details><summary>Motion measurements</summary><div class="details-grid"><div class="detail"><strong id="travel"></strong><span>Root distance travelled</span></div><div class="detail"><strong id="mean-speed"></strong><span>Mean root speed</span></div><div class="detail"><strong id="bone-variation"></strong><span>Largest bone length variation</span></div></div><div class="muted">Numerical diagnostics describe the animation data. They do not measure visual quality or whether the motion matches its prompt.</div><ul id="warnings"></ul></details>
+    <footer><span>Skeletal preview · Meters · +Y up · Ground plane XZ</span><span>Space: play/pause · ← / →: step · Home / End: first / last frame</span></footer>
+    <p id="status" class="sr-only" aria-live="polite"></p>
+  </main>
+  <script id="motion-data" type="application/json">__MOTION_DATA__</script>
+  <script>
+    'use strict';
+    const motion = JSON.parse(document.getElementById('motion-data').textContent);
+    const $ = id => document.getElementById(id);
+    const canvas = $('canvas');
+    const ctx = canvas.getContext('2d');
+    const root = motion.parents.indexOf(-1);
+    const edges = motion.parents.map((parent, child) => [parent, child]).filter(([parent]) => parent >= 0);
+    let sample = 0, frame = 0, playing = false, speed = 1, lastTime = 0, yaw = -0.55, pitch = 0.22, zoom = 1;
+    let width = 0, height = 0, drag = null, target = [0, 0, 0], radius = 2, dirty = true;
+    const times = motion.frameIndices;
+    $('title').textContent = motion.title;
+    $('subtitle').textContent = `${motion.model} · ${motion.fps} FPS · ${motion.positions.length} sample${motion.positions.length === 1 ? '' : 's'}`;
+    $('skeleton-tag').textContent = motion.skeleton;
+    $('duration').textContent = (motion.frames / motion.fps).toFixed(2);
+    $('frame-count').textContent = String(motion.frames);
+    $('joint-count').textContent = String(motion.parents.length);
+    $('scrub').max = String(motion.frames - 1);
+    $('sampling-note').textContent = times.length < motion.frames ? `Preview uses ${times.length} sampled poses; original timing retained` : 'Every source frame included';
+    motion.positions.forEach((_, i) => { const option = document.createElement('option'); option.value = String(i); option.textContent = String(i + 1); $('sample').append(option); });
+    motion.summary.warnings.forEach(warning => { const item = document.createElement('li'); item.textContent = warning; $('warnings').append(item); });
+    function refreshSample() {
+      const bounds = motion.summary.sample_statistics[sample];
+      target = bounds.bounds_min_m.map((value, i) => (value + bounds.bounds_max_m[i]) / 2);
+      radius = Math.max(0.5, Math.hypot(...bounds.bounds_max_m.map((value, i) => value - bounds.bounds_min_m[i])) / 2);
+      $('travel').textContent = `${bounds.root_travel_m.toFixed(3)} m`;
+      $('mean-speed').textContent = bounds.mean_root_speed_m_s === null ? '—' : `${bounds.mean_root_speed_m_s.toFixed(3)} m/s`;
+      const variation = motion.summary.max_bone_length_variation_m;
+      $('bone-variation').textContent = variation === null ? '—' : `${(variation * 1000).toFixed(2)} mm`;
+      dirty = true;
+    }
+    function poseAt(sourceFrame) {
+      let lo = 0, hi = times.length - 1;
+      while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (times[mid] <= sourceFrame) lo = mid; else hi = mid - 1; }
+      const next = Math.min(lo + 1, times.length - 1), span = times[next] - times[lo];
+      const alpha = span ? Math.max(0, Math.min(1, (sourceFrame - times[lo]) / span)) : 0;
+      const a = motion.positions[sample][lo], b = motion.positions[sample][next];
+      return a.map((joint, i) => joint.map((value, axis) => value + (b[i][axis] - value) * alpha));
+    }
+    function project(point, center) {
+      const x = point[0] - center[0], y = point[1] - center[1], z = point[2] - center[2];
+      const rx = x * Math.cos(yaw) + z * Math.sin(yaw), rz = -x * Math.sin(yaw) + z * Math.cos(yaw);
+      const ry = y * Math.cos(pitch) - rz * Math.sin(pitch), depthAxis = y * Math.sin(pitch) + rz * Math.cos(pitch);
+      const depth = radius * 3.4 * zoom - depthAxis;
+      if (depth < radius * 0.05) return null;
+      const scale = Math.min(width, height) * 1.25 / depth;
+      return [width / 2 + rx * scale, height * 0.52 - ry * scale, depth];
+    }
+    function line(a, b, color, weight) {
+      if (!a || !b) return;
+      ctx.strokeStyle = color; ctx.lineWidth = weight; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke();
+    }
+    function draw() {
+      if (!width || !height) return;
+      ctx.clearRect(0, 0, width, height);
+      const pose = poseAt(frame);
+      const center = $('follow').checked ? [pose[root][0], target[1], pose[root][2]] : target;
+      const step = Math.pow(10, Math.floor(Math.log10(Math.max(radius / 3, 0.1))));
+      const extent = Math.ceil(radius * 1.8 / step), cx = Math.round(center[0] / step) * step, cz = Math.round(center[2] / step) * step;
+      for (let i = -extent; i <= extent; i++) {
+        line(project([cx + i * step, 0, cz - extent * step], center), project([cx + i * step, 0, cz + extent * step], center), '#33515a55', 0.7);
+        line(project([cx - extent * step, 0, cz + i * step], center), project([cx + extent * step, 0, cz + i * step], center), '#33515a55', 0.7);
+      }
+      if ($('show-path').checked) {
+        ctx.setLineDash([3, 5]);
+        const path = motion.positions[sample].map(p => project([p[root][0], 0.006, p[root][2]], center));
+        for (let i = 1; i < path.length; i++) line(path[i - 1], path[i], '#73cdbb88', 1.5);
+        ctx.setLineDash([]);
+      }
+      const points = pose.map(point => project(point, center));
+      const sorted = edges.slice().sort((a, b) => ((points[b[0]]?.[2] || 0) + (points[b[1]]?.[2] || 0)) - ((points[a[0]]?.[2] || 0) + (points[a[1]]?.[2] || 0)));
+      ctx.lineCap = 'round';
+      for (const [parent, child] of sorted) {
+        const name = motion.names[child].toLowerCase();
+        const color = name.includes('left') || name.startsWith('l_') ? '#aaf0cc' : name.includes('right') || name.startsWith('r_') ? '#71bdde' : '#d9ede7';
+        line(points[parent], points[child], '#08191caa', 8);
+        line(points[parent], points[child], color, 3.5);
+      }
+      for (let i = 0; i < points.length; i++) {
+        const point = points[i]; if (!point) continue;
+        ctx.beginPath(); ctx.arc(point[0], point[1], i === root ? 5 : 2.5, 0, Math.PI * 2); ctx.fillStyle = i === root ? '#e8efbd' : '#ddf6ed'; ctx.fill();
+      }
+      $('scrub').value = String(Math.round(frame));
+      $('scrub').setAttribute('aria-valuetext', `Frame ${Math.round(frame)} of ${motion.frames - 1}, ${(frame / motion.fps).toFixed(2)} seconds`);
+      $('frame-time').textContent = `FRAME ${String(Math.round(frame)).padStart(4, '0')} / ${motion.frames - 1}    ·    ${(frame / motion.fps).toFixed(2)} s`;
+      dirty = false;
+    }
+    function setPlaying(value) {
+      playing = value; lastTime = 0; $('play').textContent = playing ? 'Ⅱ Pause' : '▶ Play';
+      $('play').setAttribute('aria-label', playing ? 'Pause animation' : 'Play animation');
+      $('status').textContent = playing ? 'Animation playing' : 'Animation paused';
+    }
+    function tick(time) {
+      if (playing && lastTime) {
+        frame += Math.min((time - lastTime) / 1000, 0.25) * motion.fps * speed;
+        if (frame >= motion.frames) { if ($('loop').checked) frame %= motion.frames; else { frame = motion.frames - 1; setPlaying(false); } }
+        dirty = true;
+      }
+      lastTime = time;
+      if (dirty) draw();
+      requestAnimationFrame(tick);
+    }
+    $('play').addEventListener('click', () => { if (!playing && frame >= motion.frames - 1) frame = 0; setPlaying(!playing); dirty = true; });
+    $('scrub').addEventListener('input', event => { frame = Number(event.target.value); dirty = true; });
+    $('speed').addEventListener('change', event => { speed = Number(event.target.value); });
+    $('sample').addEventListener('change', event => { sample = Number(event.target.value); refreshSample(); });
+    ['show-path', 'follow'].forEach(id => $(id).addEventListener('change', () => { dirty = true; }));
+    document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => {
+      const views = { orbit: [-0.55, 0.22], front: [0, 0], side: [Math.PI / 2, 0], top: [0, Math.PI / 2 - 0.001] };
+      [yaw, pitch] = views[button.dataset.view]; zoom = 1; dirty = true;
+      document.querySelectorAll('[data-view]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    }));
+    canvas.addEventListener('pointerdown', event => { drag = [event.clientX, event.clientY]; canvas.setPointerCapture(event.pointerId); });
+    canvas.addEventListener('pointermove', event => {
+      if (!drag) return;
+      yaw += (event.clientX - drag[0]) * 0.008; pitch = Math.max(-1.5, Math.min(1.5, pitch + (event.clientY - drag[1]) * 0.008));
+      drag = [event.clientX, event.clientY]; dirty = true;
+      document.querySelectorAll('[data-view]').forEach(button => button.setAttribute('aria-pressed', 'false'));
+    });
+    ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(name => canvas.addEventListener(name, () => { drag = null; }));
+    canvas.addEventListener('wheel', event => { event.preventDefault(); zoom = Math.max(0.35, Math.min(6, zoom * Math.exp(event.deltaY * 0.001))); dirty = true; }, { passive: false });
+    document.addEventListener('keydown', event => {
+      if (event.target.matches('input, select, button, summary')) return;
+      if (event.key === ' ') { event.preventDefault(); setPlaying(!playing); }
+      else if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+        event.preventDefault(); setPlaying(false);
+        frame = event.key === 'Home' ? 0 : event.key === 'End' ? motion.frames - 1 : Math.max(0, Math.min(motion.frames - 1, Math.round(frame) + (event.key === 'ArrowRight' ? 1 : -1)));
+        dirty = true;
+      }
+    });
+    new ResizeObserver(() => {
+      const box = canvas.getBoundingClientRect(), ratio = Math.min(window.devicePixelRatio || 1, 2);
+      width = box.width; height = box.height; canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0); dirty = true;
+    }).observe(canvas);
+    refreshSample(); requestAnimationFrame(tick);
+  </script>
+</body>
+</html>

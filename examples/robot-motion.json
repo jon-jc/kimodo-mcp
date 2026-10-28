@@ -1,0 +1,16 @@
+{
+  "request": {
+    "model": "kimodo-g1-rp",
+    "segments": [
+      {
+        "text": "A person takes two careful steps forward and stands still.",
+        "duration": 4.0
+      }
+    ],
+    "seed": 12,
+    "samples": 1,
+    "steps": 50,
+    "postprocess": false,
+    "formats": ["npz", "csv"]
+  }
+}

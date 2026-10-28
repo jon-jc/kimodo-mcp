@@ -137,6 +137,8 @@ class JobStore:
             )
 
     def submit(self, request: dict, *, launch: bool = True) -> dict:
+        if launch and self.settings.worker_mode == "service" and not self.service_status()["available"]:
+            raise ValueError("Generation worker is offline. Start kimodo-mcp-worker outside the MCP client first.")
         job_id = uuid.uuid4().hex
         now = time.time()
         with self.connect() as conn:
@@ -151,7 +153,7 @@ class JobStore:
             atomic_json(directory / "request.json", request)
             record = {"request": request, "cancel_requested": False}
             conn.execute("INSERT INTO jobs VALUES (?,?,?,?,?)", (job_id, "queued", now, now, json.dumps(record)))
-        if launch:
+        if launch and self.settings.worker_mode == "child":
             try:
                 with (directory / "runner.log").open("ab") as log:
                     options: dict[str, Any] = {"start_new_session": True}
@@ -165,6 +167,13 @@ class JobStore:
             except Exception as exc:
                 self.update(job_id, "failed", error=f"Cannot start supervisor: {exc}")
         return self.get(job_id)
+
+    def service_status(self) -> dict:
+        try:
+            data = json.loads((self.root / "worker-service.json").read_text(encoding="utf-8"))
+            return {**data, "available": 0 <= time.time() - data["updated"] < 15}
+        except (OSError, ValueError, KeyError, TypeError):
+            return {"available": False}
 
     def cancel(self, job_id: str) -> dict:
         self.update(job_id, "cancelling", cancel_requested=True)
