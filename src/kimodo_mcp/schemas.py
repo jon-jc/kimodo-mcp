@@ -23,6 +23,20 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_default=True)
 
 
+class QualityThresholds(StrictModel):
+    """Review sensitivities in physical units; none is a universal quality score."""
+
+    speed_m_s: Annotated[Finite, Field(ge=0, le=10000)] = 12.0
+    acceleration_m_s2: Annotated[Finite, Field(ge=0, le=10000)] = 150.0
+    jerk_m_s3: Annotated[Finite, Field(ge=0, le=10000)] = 2000.0
+    angular_speed_rad_s: Annotated[Finite, Field(ge=0, le=10000)] = 25.0
+    bone_drift_m: Annotated[Finite, Field(ge=0, le=10000)] = 0.005
+    contact_slide_m_s: Annotated[Finite, Field(ge=0, le=10000)] = 0.05
+    floor_penetration_m: Annotated[Finite, Field(ge=0, le=10000)] = 0.01
+    contact_probability: Annotated[Finite, Field(ge=0, le=1)] = 0.5
+    floor_y_m: Annotated[Finite, Field(ge=-10000, le=10000)] = 0.0
+
+
 class PromptSegment(StrictModel):
     text: Annotated[str, Field(min_length=1, max_length=2000, strict=True)]
     duration: Annotated[Finite, Field(ge=0.2, le=10.0)]
