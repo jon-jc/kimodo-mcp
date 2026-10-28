@@ -38,7 +38,7 @@ The contact sheet combines uniform timeline coverage, endpoints, and diagnostic 
 
 Rendering is a function of the requested integer frame. `window.renderFrame(frame)` and `window.renderReviewCard(index)` support visual regression checks. Drawing a frame after later frames must reproduce its pixels in the same browser environment. Browser pixel identity is a renderer check, not proof of physical correctness or cross-browser pixel equivalence.
 
-The page records SHA-256 hashes of its source archives. Numerical reports also include canonical per-frame SHA-256 hashes and a content hash over the supported motion channels and rig metadata. Archive hashes identify the exact files; canonical hashes allow numerical comparisons despite archive packaging differences. Hash equality does not establish aesthetic quality or equality of uninspected custom channels.
+The page records SHA-256 hashes of its source archives. Numerical reports also include canonical per-frame SHA-256 hashes and a content hash over the supported motion channels and rig metadata. Single-clip review checks a supplied report's sample, timing, and content hashes when present. Comparison checks its supplied timing and alignment metadata. Archive hashes identify the exact files; canonical hashes allow numerical comparisons despite archive packaging differences. Hash equality does not establish aesthetic quality or equality of uninspected custom channels.
 
 A 120-sample motion at 30 FPS has four seconds of sample playback and a final key at `119 / 30 = 3.966667` seconds. Both quantities are labeled. Unreal reports the key span; comparing it directly with sample playback duration would create an apparent one-frame error.
 
@@ -46,7 +46,7 @@ Comparisons require matching FPS, skeleton identifiers, joint names, and hierarc
 
 ## What transfers from Animate
 
-Paths in this table are relative to Animate's `plugins/animate/skills/animate/` directory. The study covered the tracked text sources, seven style kits and their demos, templates, examples, grammar, tools, and repository metadata. Reading its external authoring instructions did not install them or adopt their approval workflow.
+Paths in this table are relative to Animate's `plugins/animate/skills/animate/` directory. The study read all 105 tracked text files, including seven style kits and their demos, templates, examples, grammar, tools, and repository metadata. Its nine PNG references were inventoried; the combined style gallery and storyboard were visually inspected, while seven individual style sample PNGs were not separately inspected. Reading its external authoring instructions did not install them or adopt their approval workflow.
 
 | Source area | Relevant idea and treatment |
 | --- | --- |
