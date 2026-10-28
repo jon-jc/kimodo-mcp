@@ -12,7 +12,7 @@ import numpy as np
 
 from .artifacts import _load_motion
 from .catalog import model_info
-from .schemas import PoseConstraint
+from .schemas import GenerateRequest, PoseConstraint
 
 PoseType = Literal["fullbody", "left-hand", "right-hand", "left-foot", "right-foot"]
 
@@ -143,3 +143,32 @@ def extract_pose_constraint(
         root_positions=[root.tolist()],
         smooth_root_2d=[root[[0, 2]].tolist()],
     )
+
+
+def anchor_start(request: GenerateRequest, path: str | Path, source_frame: int) -> GenerateRequest:
+    """Anchor frame zero to one selected SOMA sample without changing its source.
+
+    Body positions and four end-effector orientation sets mirror the upstream
+    transition approach. This anchors one pose, not its velocity or a seamless
+    transition. The caller resolves a completed job's individual sample NPZ.
+    """
+    if request.constraints:
+        raise ValueError("Start-pose anchoring requires a request without existing constraints.")
+    body = extract_pose_constraint(path, source_frame=source_frame, target_model=request.model)
+    motion = _load_motion(path)
+    if motion["positions"].shape[0] != 1:
+        raise ValueError("Start-pose anchoring requires an individual sample NPZ.")
+    if motion["model"] is not None and model_info(motion["model"])["skeleton"] != "SOMA":
+        raise ValueError("Source model metadata must identify a SOMA model.")
+    names = motion["names"]
+    positions = motion["positions"][0, source_frame]
+    hips = positions[names.index("RightLeg")] - positions[names.index("LeftLeg")]
+    if np.linalg.norm(hips[[0, 2]]) < 1e-8:
+        raise ValueError("Selected pose has no defined planar hip heading.")
+    values = request.model_dump(mode="json")
+    values["first_heading_angle"] = float(np.arctan2(hips[2], -hips[0]))
+    pose = body.model_dump(mode="json")
+    values["constraints"] = [
+        {**pose, "type": kind} for kind in ("fullbody", "left-hand", "right-hand", "left-foot", "right-foot")
+    ]
+    return GenerateRequest.model_validate(values)

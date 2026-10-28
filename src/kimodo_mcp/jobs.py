@@ -8,8 +8,11 @@ import re
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +24,37 @@ JOB_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 def atomic_json(path: Path, value: Any) -> None:
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(json.dumps(value, indent=2, allow_nan=False), encoding="utf-8")
-    temp.replace(path)
+    """Publish a complete JSON file, tolerating brief Windows reader collisions.
+
+    Each writer owns its temporary file. Only Windows access/sharing/lock
+    errors are retried, for at most 0.31 seconds total; persistent errors still
+    propagate and the previous destination remains intact.
+    """
+    payload = json.dumps(value, indent=2, allow_nan=False)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", dir=path.parent, prefix=f".{path.name}.", suffix=".tmp",
+            encoding="utf-8", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+        for attempt in range(6):
+            try:
+                temporary.replace(path)
+                return
+            except PermissionError as error:
+                if getattr(error, "winerror", None) not in {5, 32, 33} or attempt == 5:
+                    raise
+                time.sleep(0.01 * 2**attempt)
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                # Cleanup must not hide the publication failure. A locked
+                # private temporary file can be inspected after that error.
+                pass
 
 
 def contained_file(directory: Path, name: str) -> Path:
@@ -80,10 +111,16 @@ class JobStore:
                 "created REAL NOT NULL, updated REAL NOT NULL, record TEXT NOT NULL)"
             )
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Commit or roll back one operation, then release its database handle."""
         conn = sqlite3.connect(self.db, timeout=30)
-        conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            conn.row_factory = sqlite3.Row
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def directory(self, job_id: str) -> Path:
         if not JOB_ID.fullmatch(job_id):

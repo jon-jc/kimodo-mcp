@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#101218" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23baabf6'/%3E%3Ctext x='8' y='25' font-size='28' font-weight='bold' fill='%2319152d'%3Ek%3C/text%3E%3C/svg%3E" />
+  <title>Kimodo · Motion Studio</title>
+</head>
+<body>
+  <a class="skip-link" href="#description">Skip to animation description</a>
+  <header class="app-header">
+    <a class="wordmark" href="/" aria-label="Kimodo Motion Studio home"><span class="brand-icon" aria-hidden="true">k</span><strong>KIMODO</strong><span class="brand-separator"></span><span>Motion Studio</span></a>
+    <div class="header-status"><span class="local-badge"><span class="status-dot"></span>Local workspace</span><span id="connection" class="connection">Connecting…</span><button id="refresh" class="icon-button" aria-label="Refresh workspace" title="Refresh workspace">↻</button></div>
+  </header>
+  <div class="workspace">
+    <aside class="create-panel" aria-label="Animation creation">
+      <div class="panel-heading"><span class="eyebrow">CREATE</span><span class="subtle">01 / Describe</span></div>
+      <h1>From words<br>to movement<span class="accent">.</span></h1>
+      <p class="intro">Give your character something to do.</p>
+      <form id="create-form">
+        <label for="description" class="field-label">Describe the motion</label>
+        <textarea id="description" rows="6" maxlength="2000" required placeholder="A person stands in place and slowly waves with their right hand."></textarea>
+        <div class="prompt-meta"><span>Be specific about pace and direction</span><span id="character-count">0 / 2000</span></div>
+        <div class="presets" aria-label="Motion ideas"><button type="button" data-preset="wave">↗ Gentle wave</button><button type="button" data-preset="walk">→ Walk forward</button><button type="button" data-preset="bow">⌁ Take a bow</button></div>
+        <div class="sequence-toggle"><label><input id="sequence-mode" type="checkbox" /> Sequence of timed actions</label></div><div id="sequence-panel" hidden><p class="help">Describe each action with its starting context. Timing stays explicit.</p><div id="beats"></div><button type="button" id="add-beat" class="button secondary compact">+ Add action</button><p id="sequence-total" class="help"></p></div>
+        <div class="field-row"><div><label for="duration" class="field-label">Duration <span>seconds</span></label><input id="duration" type="number" min="0.2" max="10" step="0.1" value="4" required /></div><div><label for="candidates" class="field-label">Candidates</label><select id="candidates"><option value="1">1 candidate</option><option value="2">2 candidates</option><option value="3">3 candidates</option><option value="4">4 candidates</option></select></div></div>
+        <label for="quality" class="field-label">Generation detail</label><select id="quality"><option value="draft">Draft · quick exploration</option><option value="balanced" selected>Balanced · everyday motion</option><option value="detailed">Detailed · more generation steps</option></select>
+        <details class="advanced"><summary>Starting pose & reproducibility</summary><label class="pose-anchor-label"><input id="start-pose" type="checkbox" disabled /> Start from the current pose</label><p id="anchor-note" class="help">Select a completed SOMA character preview and pause at a pose. Anchors the starting pose; seamless blending is not guaranteed.</p><label for="seed" class="field-label">Seed <span>optional</span></label><input id="seed" type="number" min="0" max="4294967295" step="1" placeholder="Choose a fresh seed" /><p class="help">Keep a seed to compare deliberate changes. Every submitted request is saved.</p></details>
+        <div id="revision-note" class="revision-note" hidden><span>Revising a previous animation</span><button type="button" id="clear-revision">Start new</button></div>
+        <div id="plan-summary" class="plan-summary" hidden></div>
+        <button type="button" id="plan" class="button secondary full">Preview the plan <span>↗</span></button>
+        <button type="submit" id="generate" class="button primary full"><span id="generate-label">Generate animation</span><span aria-hidden="true">✦</span></button>
+        <p class="privacy-note">Runs on your local Kimodo installation.<br>Model loading can take a few minutes.</p>
+      </form>
+      <div class="runtime-card"><span class="tiny-label">RUNTIME</span><strong id="runtime-status">Checking worker…</strong><p id="runtime-detail">Connecting to your local workspace.</p></div>
+    </aside>
+    <main class="studio-main">
+      <div class="stage-heading"><div><span class="eyebrow">WORKSPACE</span><h2 id="viewer-title">Your character, in motion</h2></div><span id="asset-label" class="asset-badge">3D preview</span></div>
+      <section class="viewport-panel" aria-label="Interactive 3D character viewer">
+        <div id="viewport"><div class="viewport-grid-label">PERSPECTIVE <span>·</span> Y UP</div><div id="viewer-message" class="viewer-message"><span class="empty-symbol" aria-hidden="true">◇</span><strong>Loading your character</strong><p>Preparing the local 3D preview.</p></div><div class="viewport-corner" aria-hidden="true">Z <span>↑ Y</span> X</div></div>
+        <div class="viewer-toolbar"><div class="tool-group"><button id="reset-camera" class="small-button" title="Fit the model in view">⤢ Fit view</button><button id="wireframe" class="small-button" aria-pressed="false">Wireframe</button><button id="skeleton" class="small-button" aria-pressed="false">Skeleton</button></div><span class="viewer-hint">Drag to orbit · scroll to zoom · right-drag to pan</span></div>
+        <div class="timeline"><button id="play" class="play-button" disabled aria-label="Play animation">▶</button><label for="scrubber" class="sr-only">Animation time</label><input id="scrubber" type="range" min="0" max="1" step="0.001" value="0" disabled /><output id="time-label" for="scrubber">0.00 / 0.00 s</output><label for="speed" class="sr-only">Playback speed</label><select id="speed" aria-label="Playback speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></div>
+      </section>
+      <div class="selection-heading"><div><span class="eyebrow">TAKE YOUR PICK</span><h2>Candidates <span id="candidate-count" class="count">0</span></h2></div><button id="build-preview" class="button secondary compact" disabled>Build character preview</button></div>
+      <div id="candidates-list" class="candidate-grid"><div class="empty-inline">Your generated candidates will appear here. Choose one to inspect and export.</div></div>
+      <section class="inspect-panel" aria-label="Selected animation details"><div class="inspect-tabs" role="tablist"><button id="tab-details" role="tab" aria-selected="true" aria-controls="details-panel">Motion details</button><button id="tab-export" role="tab" aria-selected="false" aria-controls="export-panel">Send to an editor <span>↗</span></button></div>
+        <div id="details-panel" role="tabpanel" aria-labelledby="tab-details"><div class="detail-actions"><p id="selected-description">Select a completed candidate to review its motion.</p><button id="review" class="button secondary compact" disabled>Open frame review ↗</button></div><div id="metrics" class="metrics-grid"><div class="metric"><span>Duration</span><strong>—</strong></div><div class="metric"><span>Frames</span><strong>—</strong></div><div class="metric"><span>Seed</span><strong>—</strong></div></div><p class="scope-note">Diagnostics identify frames to inspect. They do not rank realism or replace visual review of your character.</p><div id="diagnostic-note" class="help"></div><div id="downloads" class="download-links" aria-label="Download selected animation files"></div><details class="comparison-settings"><summary>Compare with another candidate</summary><p class="help">Matching rigs and frame rates are required. Positive offset compares to a later frame in the second clip.</p><div class="comparison-fields"><label>Compare against<select id="compare-target"><option value="">Choose a completed candidate</option></select></label><label>Frame offset<input id="compare-offset" type="number" min="-2400" max="2400" step="1" value="0" /></label><label>Position space<select id="compare-space"><option value="world">World position</option><option value="root_relative">Relative to root</option></select></label></div><button id="compare" class="button secondary compact" disabled>Open side-by-side review ↗</button></details></div>
+        <div id="export-panel" role="tabpanel" aria-labelledby="tab-export" hidden><div class="editor-row"><div class="editor-logo blender-logo">B</div><div class="editor-copy"><h3>Blender</h3><p>Rig, retarget, and open the selected motion.</p></div><button id="send-blender" class="button secondary compact" disabled>Prepare & run ↗</button></div><details class="unreal-settings"><summary><span>Unreal Engine</span><span class="subtle">Configure import</span></summary><p class="help">Use the open project's matching imported character rig. A new animation asset is saved to your chosen destination.</p><div class="unreal-fields"><label>Project file<input id="ue-project" placeholder="D:\Project\AnimationLab.uproject" /></label><label>Skeleton asset<input id="ue-skeleton" placeholder="/Game/Characters/Character_Skeleton" /></label><label>Skeletal mesh<input id="ue-mesh" placeholder="/Game/Characters/Character" /></label><label>Destination folder<input id="ue-destination" placeholder="/Game/Animations" /></label><label>New animation name<input id="ue-name" placeholder="Wave_01" pattern="[A-Za-z_][A-Za-z0-9_]{0,63}" /></label></div><button id="send-unreal" class="button secondary full" disabled>Import into Unreal ↗</button></details><p id="export-status" class="help" role="status"></p></div>
+      </section>
+    </main>
+    <aside class="activity-panel" aria-label="Animation history"><div class="activity-heading"><div><span class="eyebrow">YOUR WORK</span><h2>Animations</h2></div><span id="job-count" class="count">0</span></div><p class="activity-subtitle">Saved locally. Ready when you are.</p><div id="job-list" class="job-list"><div class="empty-history"><span aria-hidden="true">◷</span><strong>A little motion starts here.</strong><p>Describe your first animation to get started.</p></div></div><div class="activity-footer"><span class="status-dot"></span> Requests and originals stay saved</div></aside>
+  </div>
+  <div id="notice" class="notice" hidden role="status"><span id="notice-text"></span><button id="dismiss-notice" aria-label="Dismiss notification">×</button></div>
+  <dialog id="log-dialog"><div class="log-heading"><h2>Generation log</h2><button id="close-log" class="icon-button" aria-label="Close log">×</button></div><p class="help">The most recent worker messages for the selected job.</p><pre id="log-content"></pre></dialog>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

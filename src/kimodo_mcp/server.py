@@ -24,7 +24,7 @@ from .handoff import prepare_blender_handoff as prepare_blender_files
 from .handoff import prepare_character_handoff as prepare_character_files
 from .handoff import prepare_unreal_handoff as prepare_unreal_files
 from .jobs import JobStore, contained_file, redact
-from .planning import AnimationBrief, AnimationRevision, plan_revision
+from .planning import AnimationBrief, AnimationRevision, PoseReference, plan_revision
 from .planning import plan_animation as compile_animation_plan
 from .quality import analyze_motion, compare_motion
 from .review import compare_motion_reviews
@@ -99,20 +99,35 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
         """Queue motion generation and return a job ID immediately. May download weights if operator enabled it."""
         return store.submit(request.model_dump(mode="json"))
 
+    def compile_brief(brief: AnimationBrief, start_from: PoseReference | None = None) -> dict[str, Any]:
+        plan = compile_animation_plan(brief)
+        if start_from is not None:
+            from .pose import anchor_start
+
+            artifact = motion_artifact(start_from.job_id, f"motion_{start_from.sample_index:02d}.npz")
+            request = anchor_start(GenerateRequest.model_validate(plan["request"]),
+                                   artifact["absolute_path"], source_frame=start_from.frame)
+            plan.update(request=request.model_dump(mode="json"), plan=request.validated_plan(),
+                        start_from={**start_from.model_dump(), "source_sha256": artifact["sha256"]})
+            plan["notes"].append("Starting pose, hand/foot orientations and heading are anchored to the selected sample. "
+                                 "World root position is retained; velocity continuity and seamless blending are not guaranteed.")
+        return plan
+
     @mcp.tool(annotations=READ_ONLY)
-    def plan_animation(brief: AnimationBrief) -> dict[str, Any]:
+    def plan_animation(brief: AnimationBrief, start_from: PoseReference | None = None) -> dict[str, Any]:
         """Turn a natural action description and optional timed beats into an explicit generation plan.
 
         Choose draft, balanced or detailed effort. Defaults: four seconds, one candidate, seed zero,
         current SOMA model, native postprocessing, NPZ and standard-T-pose BVH. No generation is started.
         """
-        return compile_animation_plan(brief)
+        return compile_brief(brief, start_from)
 
     @mcp.tool(annotations=GENERATION)
-    def generate_animation(brief: AnimationBrief) -> dict[str, Any]:
+    def generate_animation(brief: AnimationBrief, start_from: PoseReference | None = None) -> dict[str, Any]:
         """Generate from a plain-language brief with transparent presets; return a durable job immediately."""
-        plan = compile_animation_plan(brief)
-        job = store.submit(plan["request"], context={"brief": plan["brief"], "notes": plan["notes"]})
+        plan = compile_brief(brief, start_from)
+        job = store.submit(plan["request"], context={"brief": plan["brief"], "notes": plan["notes"],
+                                                    "start_from": plan.get("start_from")})
         return {**job, "plan": plan["plan"], "notes": plan["notes"]}
 
     @mcp.tool(annotations=GENERATION)
@@ -362,6 +377,23 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
         )
         return result.model_dump()
 
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def execute_blender_handoff(
+        job_id: str, source_kind: Literal["skeleton", "character"] = "character",
+        sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
+        attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+    ) -> dict[str, Any]:
+        """Run only the prepared fixed script in the connected local Blender and verify its exports.
+
+        A completed receipt is reused. After an uncertain dispatch inspect the receipt before a new attempt.
+        Character handoffs include an animated GLB for the local studio viewer.
+        """
+        from .blender_bridge import execute_handoff
+
+        directory = handoff_directory(job_id, source_kind, sample_index, attempt)
+        script = contained_file(directory, "character_handoff.py" if source_kind == "character" else "blender_handoff.py")
+        return execute_handoff(script, source_kind)
+
     @mcp.tool(annotations=READ_ONLY)
     def get_handoff_report(
         job_id: str, source_kind: Literal["skeleton", "character"] = "skeleton",
@@ -372,7 +404,8 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
         directory = handoff_directory(job_id, source_kind, sample_index, attempt)
         path = directory / "blender-report.json"
         if not path.is_file():
-            status = "not_completed" if (directory / "execution.lock").exists() else "not_executed"
+            status = "not_completed" if any((directory / name).exists() for name in
+                                            ("execution.lock", "bridge-dispatch.json")) else "not_executed"
             return {"status": status, "report_path": str(path)}
         path = contained_file(directory, "blender-report.json")
         if path.stat().st_size > 1_000_000:

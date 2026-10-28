@@ -3,7 +3,13 @@ import copy
 import pytest
 
 from kimodo_mcp.catalog import list_models
-from kimodo_mcp.planning import AnimationBrief, AnimationRevision, plan_animation, plan_revision
+from kimodo_mcp.planning import (
+    AnimationBrief,
+    AnimationRevision,
+    PoseReference,
+    plan_animation,
+    plan_revision,
+)
 from kimodo_mcp.schemas import GenerateRequest
 
 
@@ -143,3 +149,27 @@ def test_multibeat_revision_requires_beats_but_seed_only_is_safe():
 def test_empty_ambiguous_or_unsupported_revision_rejected(fields):
     with pytest.raises(ValueError):
         AnimationRevision(**fields)
+
+
+def test_pose_reference_is_bounded_and_keeps_brief_separate():
+    reference = PoseReference(job_id="a" * 32, frame=2399, sample_index=3)
+    assert reference.model_dump() == {"job_id": "a" * 32, "frame": 2399, "sample_index": 3}
+    assert "start_from" not in AnimationBrief.model_fields
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"job_id": "A" * 32},
+        {"job_id": "../outside"},
+        {"sample_index": True},
+        {"sample_index": 4},
+        {"frame": 2400},
+        {"frame": -1},
+        {"frame": 0.5},
+        {"path": "source.npz"},
+    ],
+)
+def test_pose_reference_rejects_paths_invalid_ids_and_indices(fields):
+    with pytest.raises(ValueError):
+        PoseReference(**{"job_id": "0" * 32, "frame": 0, **fields})
