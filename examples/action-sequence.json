@@ -1,0 +1,26 @@
+{
+  "request": {
+    "model": "kimodo-soma-rp-v1.2",
+    "segments": [
+      {
+        "text": "A person walks forward carrying a small box with both hands.",
+        "duration": 3.0
+      },
+      {
+        "text": "A person carrying a small box slows down and stops.",
+        "duration": 3.0
+      },
+      {
+        "text": "A person bends forward and places a small box on the ground.",
+        "duration": 4.0
+      }
+    ],
+    "seed": 73,
+    "samples": 1,
+    "steps": 50,
+    "transition_frames": 5,
+    "postprocess": true,
+    "formats": ["npz", "bvh"],
+    "bvh_standard_tpose": true
+  }
+}

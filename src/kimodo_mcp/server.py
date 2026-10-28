@@ -11,6 +11,8 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
+from .artifacts import create_preview
+from .artifacts import inspect_motion as inspect_archive
 from .catalog import list_models
 from .config import UPSTREAM_REVISION, Settings
 from .jobs import JobStore, redact
@@ -49,6 +51,8 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
             "runtime_python": settings.python, "upstream_directory": str(settings.repo),
             "reviewed_revision": UPSTREAM_REVISION,
             "runtime_probed": probe_runtime,
+            "worker_mode": settings.worker_mode,
+            "worker_service": store.service_status(),
         }
         if settings.repo:
             try:
@@ -107,6 +111,23 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
         """Resolve an exported file by its exact manifest path, including checksum and local URI."""
         return store.artifact(job_id, name)
 
+    @mcp.tool(annotations=READ_ONLY)
+    def inspect_motion(job_id: str, name: str = "motion_00.npz") -> dict[str, Any]:
+        """Measure a completed NPZ: timing, skeleton, root travel, bounds and finite-value checks."""
+        artifact = store.artifact(job_id, name)
+        if artifact["format"] != "npz":
+            raise ValueError("Inspection requires a native Kimodo NPZ artifact")
+        return inspect_archive(artifact["absolute_path"])
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def preview_motion(job_id: str, name: str = "motion_00.npz") -> dict[str, Any]:
+        """Create an offline HTML animation viewer with playback, scrubber and camera controls."""
+        artifact = store.artifact(job_id, name)
+        if artifact["format"] != "npz":
+            raise ValueError("Preview requires a native Kimodo NPZ artifact")
+        target = store.directory(job_id) / (name.removesuffix(".npz") + "_preview.html")
+        return create_preview(artifact["absolute_path"], target)
+
     @mcp.resource("kimodo://models")
     def model_resource() -> str:
         return json.dumps(list_models(), indent=2)
@@ -128,7 +149,7 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
             "2. Translate the brief into short text segments with explicit duration, seed, and model.\n"
             "3. Use validate_motion. Ask for missing artistic decisions only when necessary.\n"
             "4. Call generate_motion and poll get_job; use get_job_log on failure.\n"
-            "5. Inspect completed artifacts and describe observed results and limitations honestly.\n"
+            "5. Call inspect_motion and preview_motion on a completed NPZ, then get_artifact for exports.\n"
             "SOMA BVH can animate an imported skeleton in Blender; retargeting a custom mesh is a separate step."
         )
 
