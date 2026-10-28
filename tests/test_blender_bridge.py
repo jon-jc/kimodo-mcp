@@ -233,6 +233,20 @@ def test_malformed_response_rejected(payload):
         bridge._receive(connection)
 
 
+def test_response_timeout_cap_and_deadline_survive_float_rounding(monkeypatch):
+    # (76.1 + 180) - 76.1 rounds above 180 on a binary floating-point clock.
+    clock = iter([76.1, 76.1, 166.1, 256.1])
+    monkeypatch.setattr(bridge.time, "monotonic", lambda: next(clock))
+    timeouts = []
+    fragments = iter([b'{"status":', b'"ok"'])
+    connection = SimpleNamespace(settimeout=timeouts.append, recv=lambda _: next(fragments))
+    with pytest.raises(socket.timeout, match="deadline elapsed"):
+        bridge._receive(connection)
+    assert timeouts[0] == 180.0
+    assert timeouts[1] == pytest.approx(90.0)
+    assert all(0 < value <= 180.0 for value in timeouts)
+
+
 def test_oversized_response_rejected(monkeypatch):
     monkeypatch.setattr(bridge, "_MAX_RESPONSE_BYTES", 16)
     connection = SimpleNamespace(settimeout=lambda _: None, recv=lambda _: b"X" * 17)

@@ -257,7 +257,9 @@ def _receive(connection: socket.socket) -> dict[str, Any]:
     deadline = time.monotonic() + _RESPONSE_TIMEOUT
     buffer = bytearray()
     while True:
-        remaining = deadline - time.monotonic()
+        # Floating-point cancellation can put this a fraction above the cap,
+        # especially shortly after boot. Keep each socket wait within it.
+        remaining = min(_RESPONSE_TIMEOUT, deadline - time.monotonic())
         if remaining <= 0:
             raise socket.timeout("Blender response deadline elapsed")
         connection.settimeout(remaining)
