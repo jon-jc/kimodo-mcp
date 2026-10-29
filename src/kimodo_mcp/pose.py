@@ -112,6 +112,26 @@ def extract_pose_constraint(
     The caller must enforce completed-job/path provenance and validate the
     resulting full GenerateRequest for destination duration and conflicts.
     """
+    return _extract_loaded_pose(
+        _load_motion(path),
+        source_frame=source_frame,
+        target_frame=target_frame,
+        sample_index=sample_index,
+        target_model=target_model,
+        constraint_type=constraint_type,
+    )
+
+
+def _extract_loaded_pose(
+    motion: dict,
+    *,
+    source_frame: int,
+    target_frame: int = 0,
+    sample_index: int = 0,
+    target_model: str = "kimodo-soma-rp-v1.2",
+    constraint_type: PoseType = "fullbody",
+) -> PoseConstraint:
+    """Apply the same pose validation to an already safely loaded archive."""
     if model_info(target_model)["skeleton"] != "SOMA":
         raise ValueError("Pose reuse currently supports only SOMA target models.")
     for label, value, maximum in (
@@ -123,7 +143,6 @@ def extract_pose_constraint(
             raise ValueError(f"{label} must be an integer between 0 and {maximum}.")
     if constraint_type not in ("fullbody", "left-hand", "right-hand", "left-foot", "right-foot"):
         raise ValueError("Unsupported pose constraint type.")
-    motion = _load_motion(path)
     samples, frames, joints, _ = motion["positions"].shape
     if frames > 2400 or source_frame >= frames or sample_index >= samples:
         raise ValueError("Selected sample/frame is out of bounds or motion exceeds 2400 frames.")

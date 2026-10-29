@@ -13,43 +13,84 @@ from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from pydantic import Field
+from pydantic import Field, StrictInt
 
 from .artifacts import create_preview
 from .artifacts import inspect_motion as inspect_archive
+from .capabilities import (
+    SchemaName,
+    WorkflowName,
+    build_capabilities,
+    get_schema_definition,
+    get_workflow_definition,
+)
+from .capacity import capacity_snapshot, editor_connections
 from .catalog import list_models
 from .config import UPSTREAM_REVISION, Settings
 from .handoff import UnrealTarget
 from .handoff import prepare_blender_handoff as prepare_blender_files
 from .handoff import prepare_character_handoff as prepare_character_files
 from .handoff import prepare_unreal_handoff as prepare_unreal_files
-from .jobs import JobStore, contained_file, redact
+from .jobs import contained_file, redact
 from .planning import AnimationBrief, AnimationRevision, PoseReference, plan_revision
 from .planning import plan_animation as compile_animation_plan
 from .quality import analyze_motion, compare_motion
 from .review import compare_motion_reviews
 from .review import create_motion_review as create_review_file
 from .schemas import GenerateRequest, QualityThresholds
+from .workspace import Workspace
 
-READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False)
+READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
-GENERATION = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True)
+GENERATION = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
+CONFIG_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+CANCEL = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
 
 
-def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP:
+def create_server(
+    settings: Settings | None = None, port: int = 8767, workspace: Workspace | None = None,
+) -> FastMCP:
     settings = settings or Settings.from_env()
-    store = JobStore(settings)
+    workspace = workspace or Workspace(settings)
+    store = workspace.store
     store.recover_stale()
     mcp = FastMCP(
         "Kimodo Motion Studio",
         instructions=(
-            "Generate skeletal animation with a local Kimodo installation. Start with list_models and "
-            "health_check. Validate a request before generate_motion; poll get_job for completion. "
-            "Only describe an animation as generated when its job is completed. Jobs survive client "
-            "disconnects. NPZ coordinates are meters, Y-up, +Z forward. This server does not create meshes."
+            "Create and review skeletal animation with a local Kimodo runtime. Start with get_capabilities "
+            "and get_workspace_state; get_workflow provides ordered recipes and get_input_schema exposes "
+            "the complete typed controls. Use plan_animation then generate_animation for natural briefs; "
+            "validate_motion then generate_motion for explicit constraints. Use revise_animation for "
+            "preserved revisions and inspect_motion_frames/extract_motion_constraints for actual source poses. "
+            "Poll get_job; submission is not completion. Inspect diagnostics and frame reviews before selecting. "
+            "Use build_character_preview for the registered character, list_job_outputs for verified exports, "
+            "and explicit matching project/rig targets for Unreal. Never blindly retry uncertain editor dispatch. "
+            "Discovery does not establish runtime, memory, model access or editor readiness. Independent-worker "
+            "jobs survive client disconnects. NPZ coordinates are meters, Y-up, +Z forward, frames zero-based. "
+            "This server does not create meshes or automatically fit arbitrary characters."
         ),
         host="127.0.0.1", port=port,
     )
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_capabilities() -> dict[str, Any]:
+        """Discover every registered operation, workflow, input schema, model and implementation boundary."""
+        tools = await mcp.list_tools()
+        return build_capabilities([
+            {"name": tool.name, "description": tool.description or "",
+             "annotations": tool.annotations.model_dump(exclude_none=True) if tool.annotations else {}}
+            for tool in tools
+        ])
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_workflow(workflow: WorkflowName) -> dict[str, Any]:
+        """Get an ordered workflow recipe, required inputs, completion evidence and recovery guidance; run nothing."""
+        return get_workflow_definition(workflow)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_input_schema(schema_name: SchemaName) -> dict[str, Any]:
+        """Read a complete JSON input schema, including advanced generation and constraint controls."""
+        return get_schema_definition(schema_name)
 
     @mcp.tool(name="list_models", annotations=READ_ONLY)
     def models() -> dict[str, Any]:
@@ -66,12 +107,15 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
             "runtime_probed": probe_runtime,
             "worker_mode": settings.worker_mode,
             "worker_service": store.service_status(),
+            "capacity": capacity_snapshot(),
+            "editors": editor_connections(),
         }
         if settings.repo:
             try:
                 revision = subprocess.run(
                     ["git", "-C", str(settings.repo), "rev-parse", "HEAD"],
-                    capture_output=True, text=True, timeout=5, check=True,
+                    stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=5, check=True,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 ).stdout.strip()
                 result["installed_revision"] = revision
                 result["reviewed_revision_matches"] = revision == UPSTREAM_REVISION
@@ -81,13 +125,68 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
             try:
                 probe = subprocess.run(
                     [settings.python, "-m", "kimodo_mcp.worker", "--probe"],
-                    env=settings.worker_env(), capture_output=True, text=True, timeout=60,
+                    env=settings.worker_env(), stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                 )
                 result["runtime"] = json.loads(redact(probe.stdout))
                 result["runtime_exit_code"] = probe.returncode
             except (OSError, subprocess.SubprocessError, ValueError) as exc:
                 result["runtime"] = {"ready": False, "error": redact(str(exc))}
         return result
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_workspace_state(
+        probe_runtime: bool = False, recent_jobs: Annotated[StrictInt, Field(ge=0, le=20)] = 10,
+    ) -> dict[str, Any]:
+        """Read shared worker/memory/editor status, character, saved Unreal target and recent job history.
+
+        Editor reachability checks only local TCP listeners. This does not start services, load models,
+        verify an open project, or claim that the configured machine has sufficient inference capacity.
+        """
+        try:
+            character = get_character_profile()
+        except (ValueError, OSError, KeyError, TypeError) as exc:
+            character = {"configured": False, "error": redact(str(exc))[:2000]}
+        preview = workspace.character_preview()
+        return {
+            "health": health_check(probe_runtime), "character": character,
+            "unreal_target": workspace.project_target(),
+            "jobs": store.list(recent_jobs) if recent_jobs else [],
+            "opening_preview": {"path": str(preview), "uri": preview.as_uri(),
+                                "source": "operator_registered_preview", "generated_for_current_request": False}
+            if preview else None,
+            "capabilities_uri": "kimodo://capabilities",
+        }
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_unreal_target() -> dict[str, Any]:
+        """Read the same locally saved Unreal project, skeleton, mesh and destination used by the studio."""
+        target = workspace.project_target()
+        return {"configured": target is not None, "target": target}
+
+    @mcp.tool(annotations=CONFIG_WRITE)
+    def save_unreal_target(target: UnrealTarget) -> dict[str, Any]:
+        """Save explicit Unreal target fields for this workspace; this does not open a project or import assets."""
+        return workspace.save_unreal_target(target)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def list_job_outputs(job_id: str) -> dict[str, Any]:
+        """List verified native, skeleton and fitted-character files with checksums, paths and sample/attempt identity."""
+        return workspace.list_job_outputs(job_id)
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def build_character_preview(
+        job_id: str, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+        attempt: Annotated[StrictInt, Field(ge=0, le=99)] | None = None,
+    ) -> dict[str, Any]:
+        """Prepare, execute and verify a registered character preview through the same workflow as the studio.
+
+        Reuses a valid completed preview or chooses an unused attempt under a shared lock. Uncertain
+        editor dispatch blocks automatic retries. Requires the supported registered source and Blender.
+        """
+        return workspace.build_character_preview(
+            job_id, sample_index, attempt, prepare=prepare_character_handoff, execute=execute_blender_handoff,
+        )
 
     @mcp.tool(annotations=READ_ONLY)
     def validate_motion(request: GenerateRequest) -> dict[str, Any]:
@@ -159,7 +258,7 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
         """List recent jobs shared by clients configured with the same data directory."""
         return {"jobs": store.list(limit)}
 
-    @mcp.tool(annotations=LOCAL_WRITE)
+    @mcp.tool(annotations=CANCEL)
     def cancel_job(job_id: str) -> dict[str, Any]:
         """Request cancellation of a queued or running job; completed outputs remain available."""
         return store.cancel(job_id)
@@ -171,13 +270,15 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
 
     @mcp.tool(annotations=READ_ONLY)
     def get_artifact(job_id: str, name: str) -> dict[str, Any]:
-        """Resolve an exported file by its exact manifest path, including checksum and local URI."""
-        return store.artifact(job_id, name)
+        """Resolve and verify an exported file by its exact manifest path, including checksum and local URI."""
+        artifact = store.artifact(job_id, name)
+        workspace.verified_native_output(job_id, name)
+        return artifact
 
     @mcp.tool(annotations=READ_ONLY)
     def inspect_motion(job_id: str, name: str = "motion_00.npz") -> dict[str, Any]:
         """Measure a completed NPZ: timing, skeleton, root travel, bounds and finite-value checks."""
-        artifact = store.artifact(job_id, name)
+        artifact = motion_artifact(job_id, name)
         if artifact["format"] != "npz":
             raise ValueError("Inspection requires a native Kimodo NPZ artifact")
         return inspect_archive(artifact["absolute_path"])
@@ -185,7 +286,7 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
     @mcp.tool(annotations=LOCAL_WRITE)
     def preview_motion(job_id: str, name: str = "motion_00.npz") -> dict[str, Any]:
         """Create an offline HTML animation viewer with playback, scrubber and camera controls."""
-        artifact = store.artifact(job_id, name)
+        artifact = motion_artifact(job_id, name)
         if artifact["format"] != "npz":
             raise ValueError("Preview requires a native Kimodo NPZ artifact")
         target = store.directory(job_id) / (name.removesuffix(".npz") + "_preview.html")
@@ -195,10 +296,55 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
         artifact = store.artifact(job_id, name)
         if artifact["format"] != "npz":
             raise ValueError("Motion review requires a native Kimodo NPZ artifact")
-        with Path(artifact["absolute_path"]).open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != artifact["sha256"]:
-                raise ValueError("Motion changed after the job completed")
+        workspace.verified_native_output(job_id, name)
         return artifact
+
+    @mcp.tool(annotations=READ_ONLY)
+    def inspect_motion_frames(
+        job_id: str,
+        frame_indices: Annotated[list[Annotated[StrictInt, Field(ge=0, le=2399)]],
+                                 Field(min_length=1, max_length=16)],
+        sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+        joint_names: Annotated[list[Annotated[str, Field(min_length=1, max_length=256, strict=True)]],
+                               Field(min_length=1, max_length=32)] | None = None,
+        include_rotations: Annotated[bool, Field(strict=True)] = False,
+    ) -> dict[str, Any]:
+        """Read selected source frames as exact joint positions, hierarchy, timing and optional rotation matrices.
+
+        Uses checksum-verified completed motion, not rendered pixels or invented poses. Select up to 16
+        ordered frames and optionally named joints. Missing metadata remains explicitly unavailable.
+        """
+        from .motion_access import inspect_motion_frames as inspect_frames
+
+        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz")
+        result = inspect_frames(artifact["absolute_path"], frame_indices=frame_indices,
+                                joint_names=joint_names, include_rotations=include_rotations)
+        return {**result, "job_id": job_id, "sample_index": sample_index, "source_sha256": artifact["sha256"]}
+
+    @mcp.tool(annotations=READ_ONLY)
+    def extract_motion_constraints(
+        job_id: str,
+        source_frames: Annotated[list[Annotated[StrictInt, Field(ge=0, le=2399)]],
+                                 Field(min_length=1, max_length=128)],
+        target_frames: Annotated[list[Annotated[StrictInt, Field(ge=0, le=2399)]],
+                                 Field(min_length=1, max_length=128)],
+        sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+        constraint_type: Literal["fullbody", "left-hand", "right-hand", "left-foot", "right-foot"] = "fullbody",
+    ) -> dict[str, Any]:
+        """Map several actual SOMA poses to destination frames as one reusable full-body or limb constraint.
+
+        Both frame lists must be ordered, unique and equally sized. World root coordinates are retained.
+        Add the returned constraint to a new request, then validate its duration and all constraint conflicts.
+        This reads poses; it does not smooth, resample or splice clips or guarantee seamless transitions.
+        """
+        from .motion_access import extract_motion_constraints as extract_constraints
+
+        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz")
+        model = store.get(job_id)["request"]["model"]
+        result = extract_constraints(artifact["absolute_path"], source_frames=source_frames,
+                                     target_frames=target_frames, target_model=model, constraint_type=constraint_type)
+        return {**result, "source_job_id": job_id, "source_sample": sample_index,
+                "source_sha256": artifact["sha256"], "model": model}
 
     @mcp.tool(annotations=READ_ONLY)
     def extract_pose_constraint(
@@ -483,37 +629,74 @@ def create_server(settings: Settings | None = None, port: int = 8767) -> FastMCP
             raise ValueError("Handoff report exceeds its size limit")
         return json.loads(path.read_text(encoding="utf-8"))
 
-    @mcp.resource("kimodo://models")
+    @mcp.resource("kimodo://models", name="Supported Kimodo models", mime_type="application/json",
+                  description="Exact model identifiers, skeletons, native formats and reviewed upstream revision.")
     def model_resource() -> str:
         return json.dumps(list_models(), indent=2)
 
-    @mcp.resource("kimodo://jobs/{job_id}")
+    @mcp.resource("kimodo://jobs/{job_id}", name="Animation job", mime_type="application/json",
+                  description="Saved request, lineage, status, progress and completed manifest for a managed job.")
     def job_resource(job_id: str) -> str:
         return json.dumps(store.get(job_id), indent=2)
 
-    @mcp.resource("kimodo://request-schema")
+    @mcp.resource("kimodo://request-schema", name="Generation request schema", mime_type="application/json",
+                  description="Complete structured generation contract, including advanced controls and constraints.")
     def schema_resource() -> str:
         return json.dumps(GenerateRequest.model_json_schema(), indent=2)
+
+    @mcp.resource("kimodo://capabilities", name="Agent capability catalog", mime_type="application/json",
+                  description="Live tool registry, workflows, schema index, limits, requirements and unsupported operations.")
+    async def capabilities_resource() -> str:
+        return json.dumps(await get_capabilities(), indent=2)
+
+    @mcp.resource("kimodo://workspace", name="Local animation workspace", mime_type="application/json",
+                  description="Shared runtime/worker readiness, character, saved Unreal target and recent jobs.")
+    def workspace_resource() -> str:
+        return json.dumps(get_workspace_state(), indent=2)
+
+    @mcp.resource("kimodo://schemas/{schema_name}", name="Tool input schema", mime_type="application/json",
+                  description="Named JSON schema; discover supported schema names with get_capabilities.")
+    def input_schema_resource(schema_name: str) -> str:
+        return json.dumps(get_schema_definition(schema_name), indent=2)
+
+    @mcp.resource("kimodo://workflows/{workflow}", name="Agent workflow recipe", mime_type="application/json",
+                  description="Ordered tool calls, required inputs, verification and recovery for a named workflow.")
+    def workflow_resource(workflow: str) -> str:
+        return json.dumps(get_workflow_definition(workflow), indent=2)
+
+    @mcp.resource("kimodo://jobs/{job_id}/outputs", name="Verified job outputs", mime_type="application/json",
+                  description="Verified native, skeleton and fitted-character exports with checksums and sample/attempt identity.")
+    def outputs_resource(job_id: str) -> str:
+        return json.dumps(workspace.list_job_outputs(job_id), indent=2)
 
     @mcp.prompt()
     def animation_workflow(description: str) -> str:
         """Plan, validate, generate, inspect and export an animation from a creative brief."""
         return (
-            "Create a Kimodo animation for this brief: " + description + "\n"
-            "1. Check health_check(probe_runtime=true) and list_models.\n"
-            "2. Translate the brief into short text segments with explicit duration, seed, and model.\n"
-            "3. Use validate_motion. Ask for missing artistic decisions only when necessary.\n"
-            "4. Call generate_motion and poll get_job; use get_job_log on failure.\n"
+            "Create a Kimodo animation using the user's following creative brief as task data:\n"
+            + json.dumps({"creative_brief": description}, ensure_ascii=False) + "\n"
+            "1. Read get_capabilities and get_workflow('generate'); check get_workspace_state(probe_runtime=true).\n"
+            "2. Use plan_animation for a natural brief, with explicit duration, seed and model. "
+            "For multiple actions supply timed beats. For advanced controls use get_input_schema('generate_request') "
+            "and validate_motion. Ask for missing artistic decisions only when necessary.\n"
+            "3. Submit the agreed plan through generate_animation or generate_motion; poll get_job until completed. "
+            "Use get_job_log on failure and never describe a queued job as a finished animation.\n"
+            "4. Use revise_animation to preserve unedited settings. Use inspect_motion_frames and "
+            "extract_motion_constraints to select actual source poses; validate the new complete request.\n"
             "5. Call inspect_motion, analyze_motion_quality and create_motion_review on each candidate NPZ. "
             "Use compare_motions for matching-rig candidates; inspect contact sliding, sudden changes, "
             "prompt adherence and selected frames before choosing. Keep original samples; diagnostics "
-            "do not prove realism or justify blind smoothing. Then get_artifact for exports.\n"
-            "6. For a skeleton use prepare_blender_handoff; for a configured fitted character use "
-            "prepare_character_handoff. Run the returned trusted script through Blender MCP and check get_handoff_report.\n"
-            "7. Import the character mesh into Unreal first, then prepare_unreal_handoff with its exact project, "
-            "Skeleton and SkeletalMesh paths. Use execute_unreal_handoff, check get_unreal_report, "
+            "do not prove realism or justify blind smoothing. Use list_job_outputs to discover verified exports.\n"
+            "6. For a registered fitted character use build_character_preview; retain its sample_index and attempt. "
+            "For a skeleton use prepare_blender_handoff then execute_blender_handoff(source_kind='skeleton'), "
+            "and get_handoff_report with the same source kind, sample and attempt.\n"
+            "7. Use get_unreal_target or save an explicit target. Import the character mesh into Unreal first, "
+            "then prepare_unreal_handoff with the exact project, Skeleton and SkeletalMesh paths. "
+            "Use execute_unreal_handoff, check get_unreal_report, "
             "then inspect the imported animation through Unreal MCP.\n"
-            "Different rigs require retargeting; never attach SOMA animation directly to an unrelated skeleton."
+            "Pass source_kind='character' and the same sample/attempt for character handoffs; use 'skeleton' for generic BVH. "
+            "Inspect receipts after uncertain editor timeouts before retrying. Different rigs require retargeting; "
+            "never attach SOMA animation directly to an unrelated skeleton."
         )
 
     return mcp

@@ -54,8 +54,9 @@ def completed(settings):
     directory = store.directory(job["id"])
     content = b"bounded fixture data"
     (directory / "motion_00.npz").write_bytes(content)
-    artifact = {"path": "motion_00.npz", "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
-    atomic_json(directory / "manifest.json", {"artifacts": [artifact], "fps": 30, "frames": 30})
+    artifact = {"path": "motion_00.npz", "format": "npz", "sample_index": 0,
+                "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+    atomic_json(directory / "manifest.json", {"artifacts": [artifact], "fps": 30, "frames": 30, "samples": 1})
     store.update(job["id"], "completed")
     return store, job, directory
 
@@ -201,6 +202,14 @@ def test_jobs_artifact_allowlist_and_state_urls(studio):
     assert client.get("/api/jobs/" + "a" * 32).status_code == 404
 
 
+def test_native_download_checks_current_file_checksum(studio):
+    client, settings, _, _ = studio
+    _, job, directory = completed(settings)
+    path = directory / "motion_00.npz"
+    path.write_bytes(b"X" * path.stat().st_size)
+    assert client.get(f"/api/files/{job['id']}/motion_00.npz").status_code == 404
+
+
 def test_static_and_download_traversal_rejected(studio):
     client, settings, _, web = studio
     (web.parent / "secret.txt").write_text("do not serve")
@@ -255,6 +264,9 @@ def test_unreal_target_roundtrip_and_validation(studio):
     response = client.post("/api/actions/save_unreal_target", headers=token, json={"target": target})
     assert response.status_code == 200, response.text
     assert client.get("/api/state").json()["targets"]["unreal"]["asset_name"] == "Wave"
+    readback = client.post("/api/actions/get_unreal_target", headers=token, json={})
+    assert readback.status_code == 200
+    assert readback.json()["result"]["target"] == response.json()["result"]["target"]
     target["destination_path"] = "/Game/../../External"
     assert (
         client.post("/api/actions/save_unreal_target", headers=token, json={"target": target}).status_code

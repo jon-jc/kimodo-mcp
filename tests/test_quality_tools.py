@@ -66,7 +66,7 @@ def test_changed_source_and_unlisted_paths_are_rejected(tmp_path):
     with pytest.raises(ValueError, match="not listed"):
         call(job, "../outside.npz")
     source.write_bytes(source.read_bytes() + b"changed")
-    with pytest.raises(ValueError, match="changed"):
+    with pytest.raises(ValueError, match="changed|differs"):
         call(job)
 
 
