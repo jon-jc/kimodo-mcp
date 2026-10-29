@@ -24,6 +24,7 @@ from .jobs import JobStore, atomic_json, contained_file
 
 DOWNLOAD_PATH = re.compile(
     r"(?:motion_\d{2}(?:_amass)?\.(?:npz|bvh|csv)|motion_\d{2}_preview\.html|"
+    r"exports/[0-9a-f]{64}/(?:motion_\d{2}\.(?:bvh|csv)|motion_\d{2}_amass\.npz|export-report\.json)|"
     r"reviews/(?:motion|comparison)-[0-9a-f]{20}\.(?:html|json)|"
     r"handoffs/(?:character|skeleton)-motion_\d{2}(?:-attempt\d{2})?/"
     r"(?:character-preview\.glb|(?:character|animation)\.(?:fbx|blend)|blender-report\.json|"
@@ -207,17 +208,35 @@ class Workspace:
         if report_path.parent != directory.resolve() or directory.is_symlink():
             raise ValueError("Skeleton report must stay in its own handoff")
         prepared = _read_json(request_path)
-        name = f"motion_{index:02d}.bvh"
-        entries = [item for item in manifest.get("artifacts", []) if item.get("path") == name]
-        motion = contained_file(source, name)
-        if (len(entries) != 1 or prepared.get("kind") != "blender" or prepared.get("schema_version") != 1
-                or prepared.get("source_sha256") != entries[0].get("sha256")
-                or not isinstance(prepared.get("source_bvh"), str) or Path(prepared["source_bvh"]) != motion
+        if (prepared.get("kind") != "blender" or prepared.get("schema_version") != 1
+                or not isinstance(prepared.get("source_bvh"), str)
                 or prepared.get("fps") != manifest.get("fps") or prepared.get("frames") != manifest.get("frames")
                 or prepared.get("skeleton") != manifest.get("skeleton")):
             raise ValueError("Skeleton export does not belong to this job's selected motion sample")
+        motion = Path(prepared["source_bvh"])
+        name = f"motion_{index:02d}.bvh"
+        dependencies = []
+        if motion == source / name:
+            entries = [item for item in manifest.get("artifacts", []) if item.get("path") == name]
+            motion = contained_file(source, name)
+            if len(entries) != 1 or prepared.get("source_sha256") != entries[0].get("sha256"):
+                raise ValueError("Skeleton export differs from its native BVH artifact")
+        else:
+            relative = motion.relative_to(source).as_posix()
+            match = re.fullmatch(r"exports/([0-9a-f]{64})/motion_\d{2}\.bvh", relative)
+            if match is None:
+                raise ValueError("Skeleton export requires a native or managed converted BVH")
+            # Validate the conversion before entering this handoff's cache lock.
+            # Its immutable input/receipt files also invalidate the handoff cache.
+            converted = self.verified_motion_export(job["id"], match[1], sample_index=index)
+            if (converted["format"] != "bvh" or Path(converted["absolute_path"]) != motion
+                    or prepared.get("source_sha256") != converted["sha256"]):
+                raise ValueError("Skeleton export differs from its verified converted BVH")
+            export_report = Path(converted["report_path"])
+            dependencies = [source / f"motion_{index:02d}.npz", export_report,
+                            export_report.with_name("request.json")]
         watched = [source / "manifest.json", report_path, request_path, motion,
-                   directory / "animation.fbx", directory / "animation.blend"]
+                   directory / "animation.fbx", directory / "animation.blend", *dependencies]
 
         def validate():
             bones = _validate_request(prepared, "blender")
@@ -292,6 +311,64 @@ class Workspace:
         return self._output_record(path, source, checksum,
                                    "amass" if match[2] else "motion", int(match[1]))
 
+    def verified_motion_export(
+        self, job_id: str, export_id: str, sample_index: int | None = None,
+    ) -> dict[str, Any]:
+        """Bind a conversion receipt to this completed job's current source manifest."""
+        from .export import ExportRequest, verify_export
+        from .export import export_id as request_id
+
+        if not isinstance(export_id, str) or not re.fullmatch(r"[0-9a-f]{64}", export_id):
+            raise ValueError("Expected a managed motion export ID")
+        if sample_index is not None and (type(sample_index) is not int or not 0 <= sample_index <= 3):
+            raise ValueError("Sample index must be 0..3")
+        job = self.store.get(job_id)
+        if job["status"] != "completed":
+            raise ValueError("Motion exports require a completed generation job")
+        source = self.store.directory(job_id)
+        root, directory = source / "exports", source / "exports" / export_id
+        if source.is_symlink() or root.is_symlink() or directory.is_symlink():
+            raise ValueError("Motion export directories cannot be symbolic links")
+        request_path = contained_file(source, f"exports/{export_id}/request.json")
+        if request_path.parent != directory.resolve() or request_path.stat().st_size > 16384:
+            raise ValueError("Motion export request is outside its assigned directory or oversized")
+        prepared = ExportRequest.model_validate_json(request_path.read_text(encoding="utf-8"))
+        manifest = job.get("manifest", {})
+        index = prepared.sample_index
+        if (prepared.job_id != job_id or type(manifest.get("samples")) is not int
+                or not 0 <= index < manifest["samples"] or (sample_index is not None and sample_index != index)
+                or request_id(prepared) != export_id or Path(prepared.output_directory) != directory.resolve()):
+            raise ValueError("Motion export does not belong to this job's selected sample")
+        name = f"motion_{index:02d}.npz"
+        motion = contained_file(source, name)
+        entries = [item for item in manifest.get("artifacts", []) if item.get("path") == name]
+        if (len(entries) != 1 or Path(prepared.source_path) != motion
+                or prepared.source_sha256 != entries[0].get("sha256")
+                or type(entries[0].get("bytes")) is not int or entries[0]["bytes"] != motion.stat().st_size
+                or ("sample_index" in entries[0] and entries[0]["sample_index"] != index)):
+            raise ValueError("Motion export source differs from the selected job's manifest")
+        artifact = directory / prepared.basename
+        report_path = directory / "export-report.json"
+        watched = [source / "manifest.json", source / name, directory / "request.json", report_path, artifact]
+
+        def validate():
+            report = verify_export(directory, prepared)
+            if (report["frames"] != manifest.get("frames") or report["fps"] != manifest.get("fps")
+                    or report["skeleton"] != manifest.get("skeleton")
+                    or (manifest.get("model") is not None and report["model"] != manifest["model"])):
+                raise ValueError("Motion export timing or skeleton differs from the selected job's manifest")
+            output = self._output_record(artifact, source, report["artifact"]["sha256"],
+                                         "amass" if prepared.format == "amass" else "motion", index)
+            output.update(
+                export_id=export_id, source_kind="motion-export", format=prepared.format,
+                source_sha256=prepared.source_sha256, fps=report["fps"], frames=report["frames"],
+                skeleton=report["skeleton"], model=report["model"], options=report["options"],
+                coordinates=report["coordinates"], report_path=str(report_path), report_url=self.file_url(report_path),
+            )
+            return output
+
+        return self._cached_validation(report_path, watched, validate)
+
     def list_job_outputs(self, job_id: str) -> dict[str, Any]:
         job = self.store.get(job_id)
         outputs = []
@@ -315,6 +392,13 @@ class Workspace:
                     latest_skeleton[result["sample_index"]] = result
             for result in latest_skeleton.values():
                 outputs.extend(result["outputs"])
+            for directory in sorted((source / "exports").glob("*")):
+                if not re.fullmatch(r"[0-9a-f]{64}", directory.name) or not directory.is_dir():
+                    continue
+                try:
+                    outputs.append(self.verified_motion_export(job_id, directory.name))
+                except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+                    continue
         return {"job_id": job_id, "outputs": outputs}
 
     def build_character_preview(

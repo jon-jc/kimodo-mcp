@@ -2,6 +2,7 @@ import contextlib
 import hashlib
 import json
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -18,11 +19,33 @@ from kimodo_mcp.worker import (
     main,
     validate_constraint_overlap,
     validate_output,
+    write_progress,
 )
 
 
 def request(**overrides):
     return GenerateRequest.model_validate({"segments": [{"text": "A person walks.", "duration": 2.0}], **overrides})
+
+
+def test_generation_progress_survives_a_transient_windows_reader_collision(tmp_path, monkeypatch):
+    original = Path.replace
+    attempts = []
+
+    def replace(path, target):
+        attempts.append(path)
+        if len(attempts) == 1:
+            error = PermissionError("Reader briefly holds the previous snapshot")
+            error.winerror = 32
+            raise error
+        return original(path, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    write_progress(tmp_path, "exporting", completed_samples=1)
+    assert json.loads((tmp_path / "progress.json").read_text()) == {
+        "stage": "exporting", "completed_samples": 1,
+    }
+    assert len(attempts) == 2
+    assert list(tmp_path.iterdir()) == [tmp_path / "progress.json"]
 
 
 def output_arrays(samples=1, frames=60, joints=77):

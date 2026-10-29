@@ -85,10 +85,13 @@ def _example_references(tmp_path):
                   "name": "motion_00.npz", "other_name": "motion_00.npz", "attempt": 0,
                   "source_kind": "character", "source_frame": 10, "frame_indices": [0, 10, 20],
                   "offset_frames": 0, "space": "world", "target": _target(tmp_path),
+                  "format": "bvh", "bvh_standard_tpose": True, "amass_z_up": True,
+                  "mujoco_rest_zero": False,
                   "brief": {"description": "A person waves.", "duration_seconds": 2.0},
                   "revision": {"description": "A person makes a slower wave."},
                   "start_from": {"job_id": "0" * 32, "sample_index": 0, "frame": 10}},
         "steps": {"submit": {"id": "2" * 32}, "retry": {"id": "3" * 32}, "build": {"attempt": 0},
+                  "export": {"export_id": "a" * 64},
                   "job": {"request": {"segments": [{"text": "A person waves.", "duration": 2.0}]}}},
     }
 

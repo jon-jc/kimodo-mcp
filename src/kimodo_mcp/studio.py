@@ -60,6 +60,7 @@ _ACTIONS = {
     "list_job_outputs",
     "inspect_motion_frames",
     "extract_motion_constraints",
+    "export_motion",
 }
 
 
@@ -194,7 +195,13 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
                 path = Path(output["absolute_path"])
             else:
                 path = contained_file(store.directory(job_id), relative)
-                if path.parent.name.startswith("character-motion_") and path.suffix in {".glb", ".fbx", ".blend"}:
+                if relative.startswith("exports/"):
+                    output = await anyio.to_thread.run_sync(
+                        lambda: workspace.verified_motion_export(job_id, relative.split("/")[1])
+                    )
+                    if path not in {Path(output["absolute_path"]), Path(output["report_path"])}:
+                        raise ValueError("File is not the verified motion export or its report")
+                elif path.parent.name.startswith("character-motion_") and path.suffix in {".glb", ".fbx", ".blend"}:
                     await anyio.to_thread.run_sync(
                         lambda: workspace.verified_preview(path.with_name("blender-report.json"), store.directory(job_id), job)
                     )
