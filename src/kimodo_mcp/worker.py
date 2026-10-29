@@ -18,6 +18,7 @@ import traceback
 from pathlib import Path
 
 from .catalog import UPSTREAM_REVISION, model_info
+from .jobs import atomic_json
 from .schemas import EndEffectorConstraint, GenerateRequest
 
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
@@ -25,13 +26,6 @@ MOTION_KEYS = (
     "local_rot_mats", "global_rot_mats", "posed_joints", "root_positions",
     "smooth_root_pos", "foot_contacts", "global_root_heading",
 )
-
-
-def atomic_json(path: Path, value: dict) -> None:
-    """Publish a complete progress/manifest snapshot with an atomic replacement."""
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2), encoding="utf-8")
-    os.replace(temporary, path)
 
 
 def write_progress(directory: Path, stage: str, **details) -> None:

@@ -15,7 +15,7 @@ from .planning import QUALITY_STEPS, AnimationBrief, AnimationRevision, PoseRefe
 from .schemas import GenerateRequest, QualityThresholds
 
 WorkflowName = Literal[
-    "generate", "revise", "reuse-pose", "inspect", "compare", "export-skeleton",
+    "generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
     "export-character", "import-unreal", "recover-job",
 ]
 SchemaName = Literal[
@@ -50,7 +50,7 @@ _GROUPS = {
         ("inspect_motion", "inspect_motion_frames", "extract_pose_constraint", "extract_motion_constraints",
          "preview_motion", "analyze_motion_quality", "create_motion_review", "compare_motions"),
     ),
-    "outputs": ("Locate verified outputs", ("get_artifact", "list_job_outputs")),
+    "outputs": ("Export and locate verified outputs", ("get_artifact", "list_job_outputs", "export_motion")),
     "blender": (
         "Export skeletons and the registered fitted character",
         ("prepare_blender_handoff", "prepare_character_handoff", "execute_blender_handoff",
@@ -210,6 +210,55 @@ _RECIPES = {
         "completion": "Both candidates are visually reviewed; selection records a reason, not an automatic score.",
         "notes": ["B frame = A frame + offset_frames. Root-relative removes translation only, retaining heading and scale.",
                   "Start in world space to see drift; comparison does not retarget, resample or blend either source."],
+    },
+    "export-motion": {
+        "title": "Export completed motion without inference",
+        "inputs": {
+            "job_id": "Completed job containing the selected native NPZ.",
+            "sample_index": "Existing source sample, default 0.",
+            "name": "Exact NPZ manifest name matching sample_index, e.g. motion_00.npz.",
+            "format": "bvh for SOMA (default), amass for SMPL-X, or csv for G1.",
+            "bvh_standard_tpose": "Boolean; default false. Change only for BVH.",
+            "amass_z_up": "Boolean; default true. Change only for AMASS.",
+            "mujoco_rest_zero": "Boolean; default false. Change only for CSV.",
+            "attempt": "Explicit unused handoff attempt, only for the optional Blender branch.",
+        },
+        "requirements": [
+            "Completed compatible managed NPZ with explicit model, FPS, canonical hierarchy and proper local rotations.",
+            "Configured Kimodo/PyTorch export runtime and canonical skeleton assets; inference weights and generation worker are unnecessary.",
+        ],
+        "steps": [
+            _completed_job(),
+            _step("source", "inspect_motion", "Confirm source timing and skeleton before choosing the compatible format.",
+                  arguments_from={"job_id": "input.job_id", "name": "input.name"}),
+            _step("export", "export_motion", "A completed receipt verifies source, options, timing and exported bytes.",
+                  arguments_from={key: f"input.{key}" for key in
+                                  ("job_id", "sample_index", "format", "bvh_standard_tpose",
+                                   "amass_z_up", "mujoco_rest_zero")},
+                  on_failure="Inspect the managed export error/log. Incomplete attempts are preserved; do not blindly rerun."),
+            _step("outputs", "list_job_outputs", "Find the verified derived file matching the returned export_id and sample.",
+                  arguments_from={"job_id": "input.job_id"}),
+            _step("prepare", "prepare_blender_handoff", "The exact derived BVH is bound to a managed skeleton handoff.",
+                  arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index",
+                                  "attempt": "input.attempt", "export_id": "steps.export.export_id"},
+                  when="Format is bvh and the user intends a Blender skeleton handoff in a compatible open session."),
+            _step("execute", "execute_blender_handoff", "Separate skeleton FBX and .blend exports are verified.",
+                  arguments={"source_kind": "skeleton"}, arguments_from=_handoff_args("skeleton")[1],
+                  when="The optional derived-BVH preparation succeeded and editor execution is intended.",
+                  on_failure="Read the matching handoff report and inspect Blender before choosing another attempt."),
+            _step("report", "get_handoff_report", "The optional skeleton handoff completed for the same sample and attempt.",
+                  arguments={"source_kind": "skeleton"}, arguments_from=_handoff_args("skeleton")[1],
+                  when="The optional Blender execution was dispatched."),
+        ],
+        "completion": "Verified interchange output; optionally a verified Blender receipt. No new motion was generated.",
+        "notes": [
+            "Defaults differ from natural-brief generation: standalone BVH export uses BONES-SEED rest unless standard T-pose is requested.",
+            "Unchanged non-applicable option defaults are allowed; changing an option for another format is rejected.",
+            "Identical source/settings reuse a reverified receipt. Changed options get a distinct export; originals stay unchanged.",
+            "SOMA30 hand expansion, AMASS default parameters and G1 joint projection are representation changes, not a lossless claim.",
+            "Export runs offline on CPU without inference, resampling, postprocessing or arbitrary file import; CSV is not robot safety validation.",
+            "The optional handoff attempt is distinct from export_id; an occupied attempt with another source is not overwritten.",
+        ],
     },
     "export-skeleton": {
         "title": "Export a SOMA skeleton through Blender",
@@ -382,6 +431,16 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
                               "formats": "Selected model's supported formats", "bvh_standard_tpose": True},
             "advanced_request": {"seed": 0, "samples": 1, "steps": 50, "formats": ["npz"],
                                  "bvh_standard_tpose": False},
+            "completed_motion_export": {"format": "bvh", "sample_index": 0, "bvh_standard_tpose": False,
+                                        "amass_z_up": True, "mujoco_rest_zero": False},
+        },
+        "completed_motion_exports": {
+            "tool": "export_motion", "requires_completed_managed_npz": True,
+            "formats": {"SOMA": "bvh", "SMPLX": "amass", "G1": "csv"},
+            "options": {"bvh": ["bvh_standard_tpose"], "amass": ["amass_z_up"], "csv": ["mujoco_rest_zero"]},
+            "new_inference": False, "downloads": False, "resampling": False,
+            "reuse": "Source, options, receipt and exported file are verified before reusing the same export_id.",
+            "blender": "Pass a returned BVH export_id to prepare_blender_handoff to select that derived source explicitly.",
         },
         "runtime_requirements": [
             "Discovery, schema access and planning require no model loading or downloads.",
@@ -389,6 +448,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
             "Downloads default offline; only operator configuration enables them. MCP does not install dependencies, authenticate or start services.",
             "Editor reachability is only a local TCP check; it does not verify scene, project, rig or available memory.",
             "The Blender and Unreal fixed-script execution paths require their configured local editor integrations.",
+            "Completed-motion conversion needs the export runtime and skeleton assets, but no inference weights, generation worker or editor; downloads are disabled.",
         ],
         "behavior": [
             "A returned job id means submission. Poll get_job until completed before claiming animation exists.",
@@ -402,7 +462,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
             "Facial animation, independent finger animation, cloth/hair physics or collision simulation in the fitted-character workflow.",
             "Automatic cross-rig retargeting, seamless stitching, velocity matching, arbitrary resampling or motion repair.",
             "Initial Unreal skeletal-mesh import through this server; use the editor's import tools first.",
-            "Arbitrary upstream example/file import or conversion, training, benchmark execution, video/audio rendering.",
+            "Arbitrary external file import/conversion, training, benchmark execution, video/audio rendering; compatible completed managed NPZ export is supported.",
             "Arbitrary code execution or file read/write, dependency installation or worker/editor startup; explicit Unreal target paths are a bounded import exception.",
             "Public remote hosting or multi-user authorization.",
         ],

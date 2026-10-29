@@ -27,7 +27,7 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Candidate comparison | Align compatible clips by frame offset and compare world positions or poses relative to the root. |
 | Editor integration | Execute fixed Blender and Unreal handoffs, then check exported files, rig compatibility, and animation timing. |
 | Downloads | Retrieve original motion, animated GLB, skeletal mesh/animation FBX, and Blender projects when available. |
-| MCP interface | Use 36 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| MCP interface | Use 37 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
 
@@ -201,7 +201,7 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **36 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **37 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
@@ -223,7 +223,8 @@ The server exposes **36 tools**. Start with `get_capabilities` for the running s
 | `cancel_job` | Request cancellation while preserving completed outputs. |
 | `get_job_log` | Read bounded worker diagnostics with supported credential redaction. |
 | `get_artifact` | Resolve a manifest-listed output with checksum and local reference. |
-| `list_job_outputs` | List verified native, skeleton, and fitted-character files with sample, attempt, and checksum identity. |
+| `list_job_outputs` | List verified native files, format conversions, and skeleton/character exports with source, sample, attempt, and checksum identity. |
+| `export_motion` | Export completed managed NPZ to compatible BVH, AMASS NPZ, or G1 CSV without inference or downloads; verify or reuse its receipt. |
 | `inspect_motion` | Inspect arrays, hierarchy, timing, bounds, and contact metadata. |
 | `inspect_motion_frames` | Read selected frame positions and optional rotations without inventing missing metadata. |
 | `preview_motion` | Create a local interactive skeleton preview from completed NPZ. |
@@ -232,7 +233,7 @@ The server exposes **36 tools**. Start with `get_capabilities` for the running s
 | `compare_motions` | Numerical and visual comparison at an explicit offset with matching rig/FPS. |
 | `get_character_profile` | Describe the fitted rig and verify its operator-registered source. |
 | `build_character_preview` | Reuse a verified preview or prepare, execute, and verify a new fitted-character export under a shared lock. |
-| `prepare_blender_handoff` | Prepare fixed Blender import/export for completed SOMA BVH. |
+| `prepare_blender_handoff` | Prepare fixed Blender import/export from native SOMA BVH or an explicitly selected verified derived BVH. |
 | `prepare_character_handoff` | Prepare fitting, skinning, and retargeting for the supported profile. |
 | `execute_blender_handoff` | Execute the verified prepared script and validate exported results. |
 | `get_handoff_report` | Read Blender export, timing, hierarchy, and deformation evidence. |
@@ -253,7 +254,7 @@ Frame inspection accepts 1–16 increasing source frames. An explicit joint sele
 | `kimodo://models` | Supported model identifiers and export formats. |
 | `kimodo://request-schema` | Advanced generation request schema, retained for compatibility. |
 | `kimodo://schemas/{schema_name}` | One of six named domain input schemas. |
-| `kimodo://workflows/{workflow}` | One of nine ordered workflow recipes. |
+| `kimodo://workflows/{workflow}` | One of ten ordered workflow recipes. |
 | `kimodo://jobs/{job_id}` | Durable job status, saved request, and completed manifest. |
 | `kimodo://jobs/{job_id}/outputs` | Verified output metadata for the selected job. |
 
@@ -320,11 +321,38 @@ The catalog contains nine exact generation identifiers; `kimodo-soma-rp-v1.2` is
 
 The [upstream review](docs/upstream-review.md) explains representation differences, benchmark limits, and source coverage. Single-clip review does not implicitly run the research benchmark.
 
+### Export an existing motion
+
+Use `export_motion` when a completed job has a native NPZ and you need a compatible interchange file or another supported rest-pose/axis option. This converts the existing sample without generating motion, resampling, postprocessing, or downloading weights. It needs the configured Kimodo/PyTorch runtime and canonical skeleton assets, but no generation worker or open editor.
+
+For a SOMA sample, pass these tool arguments:
+
+```json
+{
+  "job_id": "YOUR_COMPLETED_JOB_ID",
+  "sample_index": 0,
+  "format": "bvh",
+  "bvh_standard_tpose": true
+}
+```
+
+| Format | Source | Option and default |
+| --- | --- | --- |
+| `bvh` | SOMA30 or SOMA77 | `bvh_standard_tpose=false`: BONES-SEED rest pose; true selects standard T-pose. Output remains Y-up, in centimeters. |
+| `amass` | SMPL-X22 | `amass_z_up=true`: Z-up output; false retains Y-up. SMPL-X shape, hands, eyes, and jaw use upstream defaults. |
+| `csv` | G1/34 joints | `mujoco_rest_zero=false`: raw joint DOFs; true uses MuJoCo rest-relative angles. Output is Z-up/+X-forward with wxyz root quaternions. |
+
+The format defaults to `bvh`; choose the correct format for the source. Options are strict booleans. Changing an option that does not apply to the chosen format is rejected. BVH's standalone export default differs from natural-brief generation, which requests standard T-pose BVH.
+
+The receipt records source and output hashes, timing, options, and coordinate conventions. Identical requests reuse a verified export; changed options create a separate derived file. Original motion and generation manifests remain unchanged. `list_job_outputs` discovers verified derived exports. An incomplete attempt is retained for inspection and is not automatically rerun.
+
+For an NPZ-only SOMA job, pass the returned `export_id` to `prepare_blender_handoff` to use that exact derived BVH, then execute and read the skeleton handoff with the same sample and attempt. No new inference is needed. The [export workflow guide](docs/agent-workflows.md#export-existing-motion-without-inference) covers receipt reuse, representation limits, and downstream selection.
+
 ## Blender and Unreal workflows
 
 ### Blender
 
-For a generic SOMA skeleton, prepare a completed BVH, execute the fixed handoff, and inspect its report. It creates a separate scene and exports only its armature. The generic template requires a fresh session if `KimodoRig` already exists.
+For a generic SOMA skeleton, prepare a completed BVH, execute the fixed handoff, and inspect its report. Omit `export_id` to use the original manifest-listed BVH, or supply the exact ID from `export_motion` to select a verified derived BVH. It creates a separate scene and exports only its armature. The generic template requires a fresh session if `KimodoRig` already exists.
 
 For the supported character, register its original FBX outside Git, then prepare and execute its handoff. **Build character preview** performs this managed workflow in the studio. Results include animated GLB, rest-pose mesh FBX, animation-only FBX, a separate Blender project, and a verification report. Originals remain preserved.
 
@@ -400,6 +428,7 @@ Shorter clips and fewer steps do not remove that encoder requirement. The worker
 | --- | --- |
 | New motion | A completed local Kimodo generation produced the four-second, 120-frame wave used here. It was not substituted with an upstream example. |
 | Blender | Blender 5.2.1 executed the checked character handoff and exported the fitted rig, textured GLB, FBXs, and separate project. Reference roundtrip evidence is in the editor guide. |
+| Completed-motion conversion | Both BVH rest-pose options were exported from a real completed SOMA sample; both AMASS and G1 option variants were exercised with synthetic canonical fixtures. These checks verify conversion without new inference. |
 | Unreal | Unreal 5.8.3 saved animation on the matching 24-bone rig: 24 tracks, 120 keys, 119 intervals, 30 FPS. Native editor inspection independently checked the result. |
 | Live studio | Actual local API/GLB checks covered playback, textured rendering, planning, preserved revisions, pose anchors, timed beats, reviews, offset comparison, checksum-verified downloads, logs, Blender receipt reuse, and Unreal import. |
 | Presentation | Desktop/narrow layouts were visually inspected. Final live checks had zero browser console errors and page errors. |

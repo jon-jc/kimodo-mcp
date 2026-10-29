@@ -29,6 +29,7 @@ Call `get_workflow` with one of these identifiers:
 | `reuse-pose` | Inspect a source pose and anchor a new animation to it. |
 | `inspect` | Read timing, selected frames, physical diagnostics, and a visual review. |
 | `compare` | Compare compatible samples with explicit frame alignment. |
+| `export-motion` | Convert completed managed motion to a compatible interchange format without inference. |
 | `export-skeleton` | Prepare and execute the fixed Blender SOMA skeleton export. |
 | `export-character` | Build or reuse the registered fitted-character GLB and exports. |
 | `import-unreal` | Import a verified animation into an explicit matching project and rig. |
@@ -117,13 +118,47 @@ Choose a candidate based on observed motion, intended action, and downstream def
 
 The studio and MCP use the same workspace, jobs, character registration, saved Unreal target, and character-preview workflow. `get_unreal_target` reads the saved target. `save_unreal_target` replaces it with explicit validated fields; saving settings does not open an editor or import anything.
 
-`list_job_outputs` returns verified file metadata, including native artifacts and the latest valid derived skeleton and character outputs for each sample, with sample and attempt identity where applicable. Use the listed files rather than guessing paths. `get_artifact` remains the narrower resolver for an exact native generation-manifest entry. Review tools and execution receipts also return their managed output references. Local paths and file URIs require access to the same machine; the MCP server is not a public artifact-hosting service.
+`list_job_outputs` returns verified file metadata, including native artifacts, completed format conversions, and the latest valid derived skeleton and character outputs for each sample, with sample, export, and attempt identity where applicable. Use the listed files rather than guessing paths. `get_artifact` remains the narrower resolver for an exact native generation-manifest entry. Review tools and execution receipts also return their managed output references. Local paths and file URIs require access to the same machine; the MCP server is not a public artifact-hosting service.
 
 For the registered character, call `build_character_preview`. It reuses a valid completed preview or selects an unused attempt under a shared lock. It prepares and executes the fixed character export, verifies the result, and reports the attempt. If dispatch is uncertain, it refuses to silently start a duplicate. Inspect the matching receipt before considering a fresh attempt.
 
 For a generic SOMA skeleton, use `prepare_blender_handoff`, `execute_blender_handoff` with `source_kind="skeleton"`, then `get_handoff_report` with the same arguments. The generic script uses the stable `KimodoRig` name and requires a session without a conflicting object. It preserves existing user content and does not automatically rig an arbitrary mesh.
 
 The fitted-character profile is specific to the separately supplied source asset and checks its exact checksum. It has 24 body bones, without independent facial/finger animation or cloth/hair physics. No character source asset or model weights are bundled. See [editor setup and handoffs](editor-handoffs.md) and the [studio guide](studio.md).
+
+## Export existing motion without inference
+
+Call `export_motion` with a completed job and sample to export its native NPZ. The tool resolves the source through the original manifest, checks its hash and metadata, and invokes a fixed converter in the configured Kimodo/PyTorch runtime. It does not accept arbitrary source files or output paths. No diffusion inference, resampling, postprocessing, weight download, generation worker, or editor is involved; runtime dependencies and canonical skeleton assets must already be installed.
+
+```json
+{
+  "tool": "export_motion",
+  "arguments": {
+    "job_id": "YOUR_COMPLETED_JOB_ID",
+    "sample_index": 0,
+    "format": "bvh",
+    "bvh_standard_tpose": true
+  }
+}
+```
+
+`format` defaults to `bvh`. `sample_index` defaults to zero and must identify an existing source sample. Each option below is a strict boolean. Changed non-applicable options are rejected; irrelevant options left at their defaults are allowed.
+
+| Format | Compatible source | Relevant option | Export convention |
+| --- | --- | --- | --- |
+| `bvh` | Canonical SOMA30 or SOMA77 | `bvh_standard_tpose=false` | Y-up, centimeter offsets/root motion, BONES-SEED rest pose. True selects standard T-pose conversion. |
+| `amass` | Canonical SMPL-X22 | `amass_z_up=true` | Meters and Z-up by default; false retains Y-up. AMASS body parameters include the source FPS. |
+| `csv` | Canonical G1/34 joints | `mujoco_rest_zero=false` | Meters, Z-up, +X-forward, wxyz root quaternion, 36 values per frame. True subtracts the MuJoCo rest configuration from joint DOFs. |
+
+The source must provide explicit model, FPS, joint names, hierarchy, and proper local rotation matrices. Names/order/hierarchy must match the runtime's canonical skeleton. Format mismatch fails before publishing a completed export. Native-source and output checks include timing, array/channel structure, finite values, size, and digest; receipt verification repeats the relevant checks on reuse.
+
+The result is a completed conversion receipt rather than a new generation job. Its `export_id` binds the source SHA-256, sample, options, exporter version, and reviewed upstream revision. Derived files live inside the original job's managed export directory. The receipt records model/skeleton, source timing, options, coordinate/rest conventions, and output checksum. `list_job_outputs` advertises only conversions whose source, assigned location, receipt, and output verify against that job. The original request, motion, and generation manifest are preserved.
+
+An identical call revalidates and reuses a completed export. A format or option change creates a different export identity. A shared lock serializes identical conversions. If a call fails or times out, the managed attempt and log remain available for diagnosis; incomplete attempts are not automatically rerun. Resolve the actual failure with the operator before retrying. There is no arbitrary log-path reader or cleanup tool.
+
+Use the receipt's FPS for CSV because that format has no frame-rate header. Do not claim that conversion is lossless across representations: SOMA30 expansion fills relaxed hand detail, AMASS uses default shape/hands/eyes/jaw for absent parameters, and G1 projects rotations into its joint degrees of freedom. A G1 animation export is not robot dynamics or safety validation. None of these exporters retargets an unrelated rig.
+
+For Blender skeleton export from an NPZ-only SOMA job, first obtain a BVH receipt. Pass its exact 64-character hexadecimal `export_id` to `prepare_blender_handoff` together with the same job and sample and an explicit handoff attempt. Preparation reports `source_export_id` and `export_options`, binding that verified derived BVH. Then call `execute_blender_handoff` and `get_handoff_report` with `source_kind="skeleton"` and the same job/sample/attempt. `export_id` selects the conversion; `attempt` selects the separate editor handoff. A previously occupied attempt with a different source is not overwritten. Omit `export_id` when deliberately using the original manifest-listed BVH. AMASS and G1 CSV conversions remain downloadable artifacts rather than inputs to this SOMA handoff.
 
 ## Import into Unreal with the matching rig
 
@@ -135,7 +170,7 @@ A successful preparation creates a script, not an imported animation. Completion
 
 ## What remains outside the interface
 
-The MCP connection exposes the implemented motion workflow, not every command or demo in upstream Kimodo. It does not provide arbitrary mesh generation, general-purpose character fitting, initial Unreal mesh import, arbitrary file conversion/import, model training, benchmark execution, video/audio rendering, arbitrary code execution, or automatic motion repair and stitching.
+The MCP connection exposes the implemented motion workflow, not every command or demo in upstream Kimodo. It does not provide arbitrary mesh generation, general-purpose character fitting, initial Unreal mesh import, arbitrary external file conversion/import, model training, benchmark execution, video/audio rendering, arbitrary code execution, or automatic motion repair and stitching. Compatible export of completed managed NPZ samples is supported through `export_motion`.
 
 Dependency installation, authentication, model-download permission, worker startup, editor startup, and character-source registration are operator setup. The server does not accept arbitrary executable or read/write paths to bypass those boundaries. The Unreal target's explicit project/content paths are part of its bounded import contract.
 

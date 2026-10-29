@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import os
@@ -45,6 +46,7 @@ LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWor
 GENERATION = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True)
 CONFIG_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
 CANCEL = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+DERIVED_EXPORT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 
 
 def create_server(
@@ -63,6 +65,7 @@ def create_server(
             "validate_motion then generate_motion for explicit constraints. Use revise_animation for "
             "preserved revisions and inspect_motion_frames/extract_motion_constraints for actual source poses. "
             "Poll get_job; submission is not completion. Inspect diagnostics and frame reviews before selecting. "
+            "Use export_motion to convert completed NPZ into a compatible format without regeneration. "
             "Use build_character_preview for the registered character, list_job_outputs for verified exports, "
             "and explicit matching project/rig targets for Unreal. Never blindly retry uncertain editor dispatch. "
             "Discovery does not establish runtime, memory, model access or editor readiness. Independent-worker "
@@ -299,6 +302,34 @@ def create_server(
         workspace.verified_native_output(job_id, name)
         return artifact
 
+    @mcp.tool(annotations=DERIVED_EXPORT)
+    async def export_motion(
+        job_id: str, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+        format: Literal["bvh", "amass", "csv"] = "bvh",
+        bvh_standard_tpose: Annotated[bool, Field(strict=True)] = False,
+        amass_z_up: Annotated[bool, Field(strict=True)] = True,
+        mujoco_rest_zero: Annotated[bool, Field(strict=True)] = False,
+    ) -> dict[str, Any]:
+        """Convert a completed native NPZ into SOMA BVH, SMPL-X AMASS, or G1 MuJoCo CSV without generation.
+
+        Requires the configured Kimodo runtime; runs offline on CPU without model weights. Only the
+        source model's formats are accepted. Changed options must apply to the selected format.
+        The original job stays unchanged; matching verified exports are reused. An incomplete attempt
+        blocks automatic retries. Pass the returned export_id to prepare_blender_handoff for derived BVH.
+        """
+        from .export import export_motion as convert_motion
+
+        artifact = await asyncio.to_thread(motion_artifact, job_id, f"motion_{sample_index:02d}.npz")
+        result = await asyncio.to_thread(
+            convert_motion, settings, source_path=Path(artifact["absolute_path"]),
+            source_sha256=artifact["sha256"], job_id=job_id, sample_index=sample_index, format=format,
+            bvh_standard_tpose=bvh_standard_tpose, amass_z_up=amass_z_up, mujoco_rest_zero=mujoco_rest_zero,
+        )
+        verified = await asyncio.to_thread(
+            workspace.verified_motion_export, job_id, result["export_id"], sample_index=sample_index,
+        )
+        return {**result, "artifact": {**result["artifact"], "uri": verified["uri"], "url": verified["url"]}}
+
     @mcp.tool(annotations=READ_ONLY)
     def inspect_motion_frames(
         job_id: str,
@@ -512,16 +543,29 @@ def create_server(
     def prepare_blender_handoff(
         job_id: str, sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
         attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+        export_id: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", strict=True)] | None = None,
     ) -> dict[str, Any]:
-        """Prepare a trusted Blender script to import a generated SOMA BVH and save .blend/FBX."""
-        artifact = store.artifact(job_id, f"motion_{sample_index:02d}.bvh")
+        """Prepare a trusted Blender script to import a generated SOMA BVH and save .blend/FBX.
+
+        Omit export_id to use the original manifest BVH, or select the exact ID returned by export_motion
+        to use a verified derived BVH. Use a new attempt when changing the source. No editor action runs.
+        """
+        if export_id is None:
+            artifact = workspace.verified_native_output(job_id, f"motion_{sample_index:02d}.bvh")
+        else:
+            artifact = workspace.verified_motion_export(job_id, export_id, sample_index=sample_index)
+            if artifact["format"] != "bvh":
+                raise ValueError("The skeleton handoff requires a BVH export")
         manifest = store.get(job_id)["manifest"]
         result = prepare_blender_files(
             Path(artifact["absolute_path"]), handoff_directory(job_id, "skeleton", sample_index, attempt),
             fps=manifest["fps"], frames=manifest["frames"],
             source_sha256=artifact["sha256"], skeleton=manifest["skeleton"],
         )
-        return result.model_dump()
+        value = result.model_dump()
+        if export_id is not None:
+            value.update(source_export_id=export_id, export_options=artifact["options"])
+        return value
 
     @mcp.tool(annotations=LOCAL_WRITE)
     def execute_blender_handoff(
@@ -686,10 +730,12 @@ def create_server(
             "5. Call inspect_motion, analyze_motion_quality and create_motion_review on each candidate NPZ. "
             "Use compare_motions for matching-rig candidates; inspect contact sliding, sudden changes, "
             "prompt adherence and selected frames before choosing. Keep original samples; diagnostics "
-            "do not prove realism or justify blind smoothing. Use list_job_outputs to discover verified exports.\n"
+            "do not prove realism or justify blind smoothing. Use list_job_outputs to discover verified exports. "
+            "Use export_motion for compatible BVH/AMASS/CSV conversion without regenerating a completed NPZ.\n"
             "6. For a registered fitted character use build_character_preview; retain its sample_index and attempt. "
             "For a skeleton use prepare_blender_handoff then execute_blender_handoff(source_kind='skeleton'), "
-            "and get_handoff_report with the same source kind, sample and attempt.\n"
+            "and get_handoff_report with the same source kind, sample and attempt. If the source BVH was "
+            "created by export_motion, pass its exact export_id to preparation.\n"
             "7. Use get_unreal_target or save an explicit target. Import the character mesh into Unreal first, "
             "then prepare_unreal_handoff with the exact project, Skeleton and SkeletalMesh paths. "
             "Use execute_unreal_handoff, check get_unreal_report, "
