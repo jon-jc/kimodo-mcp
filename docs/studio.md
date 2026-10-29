@@ -2,6 +2,8 @@
 
 The studio is a local browser interface to the same planning, jobs, diagnostics, and editor operations exposed by Kimodo MCP. It lets you move from a description to reviewed animation without manually copying requests between tools.
 
+MCP clients can use `get_capabilities`, `get_workspace_state`, and `get_workflow` to discover the same workspace and complete workflows. `build_character_preview`, saved Unreal targets, and verified output listing are shared operations, available directly through MCP as well as the studio. The browser owns interactive camera and playback controls. See [the agent workflow guide](agent-workflows.md) for discovery, selected-frame inspection, reusable constraints, and exact tool contracts.
+
 Opening the interface does not download model weights or start inference. A connected studio, an available worker, an installed runtime, authorized models, and sufficient memory are separate readiness conditions.
 
 ![Real local studio with the selected textured character, source-pose controls, diagnostics, downloads, and saved jobs](images/studio-desktop.png)

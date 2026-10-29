@@ -10,7 +10,7 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 
 *An actual local studio session displaying a completed 120-frame waving motion on a separately supplied demonstration character. The screenshot shows real saved jobs and measured diagnostics. Character assets, model weights, credentials, and local project files are not included in this repository.*
 
-[Getting started](#getting-started-on-windows) · [Studio workflow](#work-in-the-browser-studio) · [MCP tools](#mcp-tools) · [Architecture](#how-it-works) · [Limitations](#scope-and-limitations) · [Troubleshooting](#troubleshooting)
+[Getting started](#getting-started-on-windows) · [Studio workflow](#work-in-the-browser-studio) · [MCP tools](#mcp-tools) · [Agent workflows](docs/agent-workflows.md) · [Architecture](#how-it-works) · [Limitations](#scope-and-limitations) · [Troubleshooting](#troubleshooting)
 
 ## What this project provides
 
@@ -27,7 +27,7 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Candidate comparison | Align compatible clips by frame offset and compare world positions or poses relative to the root. |
 | Editor integration | Execute fixed Blender and Unreal handoffs, then check exported files, rig compatibility, and animation timing. |
 | Downloads | Retrieve original motion, animated GLB, skeletal mesh/animation FBX, and Blender projects when available. |
-| MCP interface | Use 26 typed tools over stdio or loopback Streamable HTTP, sharing local jobs across clients. |
+| MCP interface | Use 36 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
 
@@ -201,16 +201,21 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **26 tools**. Submission is distinct from completed animation.
+The server exposes **36 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
+| `get_capabilities` | Discover every registered tool, workflow, schema, model, limit, and implementation boundary. |
+| `get_workflow` | Read an ordered workflow recipe without executing any actions. |
+| `get_input_schema` | Read the complete schema for briefs, revisions, requests, pose references, diagnostics, or Unreal targets. |
+| `get_workspace_state` | Read shared readiness, memory advisory, editor reachability, registered assets, saved target, and recent jobs. |
 | `list_models` | Exact model IDs, skeletons, formats, and reviewed revision. |
 | `health_check` | Configuration and worker status; optional runtime/GPU probe without weight downloads. |
 | `plan_animation` | Compile a description/timed beats into explicit settings, optionally anchored to a source pose. |
 | `generate_animation` | Submit a brief with transparent effort, seed, and candidate settings. |
 | `revise_animation` | Preview or submit a new version, retaining unchanged settings and parent-job lineage. |
 | `extract_pose_constraint` | Extract a validated full-body or limb constraint from a canonical SOMA frame. |
+| `extract_motion_constraints` | Map up to 128 actual SOMA source frames to explicit destination constraint frames. |
 | `validate_motion` | Check a structured request, frame plan, compatibility, and constraint shapes. |
 | `generate_motion` | Submit an explicit request and return a durable job ID. |
 | `get_job` | Read status, stage, request, context, and completed manifest. |
@@ -218,21 +223,41 @@ The server exposes **26 tools**. Submission is distinct from completed animation
 | `cancel_job` | Request cancellation while preserving completed outputs. |
 | `get_job_log` | Read bounded worker diagnostics with supported credential redaction. |
 | `get_artifact` | Resolve a manifest-listed output with checksum and local reference. |
+| `list_job_outputs` | List verified native, skeleton, and fitted-character files with sample, attempt, and checksum identity. |
 | `inspect_motion` | Inspect arrays, hierarchy, timing, bounds, and contact metadata. |
+| `inspect_motion_frames` | Read selected frame positions and optional rotations without inventing missing metadata. |
 | `preview_motion` | Create a local interactive skeleton preview from completed NPZ. |
 | `analyze_motion_quality` | Speed, acceleration, jerk, angular speed, bone drift, contact sliding, floor proxies, and seams. |
 | `create_motion_review` | Offline three-view player, contact sheet, and numerical report. |
 | `compare_motions` | Numerical and visual comparison at an explicit offset with matching rig/FPS. |
 | `get_character_profile` | Describe the fitted rig and verify its operator-registered source. |
+| `build_character_preview` | Reuse a verified preview or prepare, execute, and verify a new fitted-character export under a shared lock. |
 | `prepare_blender_handoff` | Prepare fixed Blender import/export for completed SOMA BVH. |
 | `prepare_character_handoff` | Prepare fitting, skinning, and retargeting for the supported profile. |
 | `execute_blender_handoff` | Execute the verified prepared script and validate exported results. |
 | `get_handoff_report` | Read Blender export, timing, hierarchy, and deformation evidence. |
+| `get_unreal_target` | Read the same saved project, rig, and destination used by the studio. |
+| `save_unreal_target` | Save explicit target fields without opening a project or importing assets. |
 | `prepare_unreal_handoff` | Prepare animation-only import into an explicit project and existing rig. |
 | `execute_unreal_handoff` | Run the verified script in the matching editor and verify the saved animation. |
 | `get_unreal_report` | Read final asset, skeleton, timing, and track verification. |
 
-Resources include `kimodo://models`, `kimodo://request-schema`, and `kimodo://jobs/{job_id}`. The `animation_workflow` prompt guides assistants through the lifecycle. The studio convenience action `build_character_preview` combines existing operations; it is not another MCP tool.
+The studio and MCP share character-preview execution and Unreal target settings. `build_character_preview` is available directly as an MCP tool; the browser calls the same operation. It chooses an unused attempt or reuses a valid receipt, and blocks automatic retries after uncertain editor dispatch. Inspect the receipt before retrying manually.
+
+Frame inspection accepts 1–16 increasing source frames. An explicit joint selection accepts up to 32 unique names. The total response is limited to 2,048 selected joint poses for positions, or 256 when rotations are requested: selected frames multiplied by selected joints. For example, a 77-joint skeleton with rotations fits three complete frames; choose fewer joints to inspect more frames. Constraint extraction accepts up to 128 corresponding source/destination frames and still requires full request validation before generation.
+
+| Resource | Content |
+| --- | --- |
+| `kimodo://capabilities` | Complete registered tool inventory, grouped capabilities, and workflow/schema index. |
+| `kimodo://workspace` | Current shared workspace state. |
+| `kimodo://models` | Supported model identifiers and export formats. |
+| `kimodo://request-schema` | Advanced generation request schema, retained for compatibility. |
+| `kimodo://schemas/{schema_name}` | One of six named domain input schemas. |
+| `kimodo://workflows/{workflow}` | One of nine ordered workflow recipes. |
+| `kimodo://jobs/{job_id}` | Durable job status, saved request, and completed manifest. |
+| `kimodo://jobs/{job_id}/outputs` | Verified output metadata for the selected job. |
+
+The `animation_workflow` prompt guides assistants through the lifecycle. The [agent workflow guide](docs/agent-workflows.md) lists every recipe and schema identifier, explains actual frame/constraint access, and distinguishes implemented MCP operations from upstream-only features and operator setup. Discovery tools remain usable when a client does not expose MCP resources. Reconnect a client with a cached tool list after upgrading.
 
 ## Request examples
 
