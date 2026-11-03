@@ -25,13 +25,14 @@ from .jobs import JobStore, atomic_json, contained_file
 DOWNLOAD_PATH = re.compile(
     r"(?:motion_\d{2}(?:_amass)?\.(?:npz|bvh|csv)|motion_\d{2}_preview\.html|"
     r"exports/[0-9a-f]{64}/(?:motion_\d{2}\.(?:bvh|csv)|motion_\d{2}_amass\.npz|export-report\.json)|"
-    r"reviews/(?:motion|comparison)-[0-9a-f]{20}\.(?:html|json)|"
-    r"handoffs/(?:character|skeleton)-motion_\d{2}(?:-attempt\d{2})?/"
+    r"variants/[0-9a-f]{64}/(?:motion_\d{2}\.npz|variant-report\.json)|"
+    r"reviews/(?:motion|comparison)-[0-9a-f]{20}\.(?:html|json)|reviews/preview-[0-9a-f]{20}\.html|"
+    r"handoffs/(?:character|skeleton)-motion_\d{2}(?:-variant[0-9a-f]{64})?(?:-attempt\d{2})?/"
     r"(?:character-preview\.glb|(?:character|animation)\.(?:fbx|blend)|blender-report\.json|"
     r"unreal-[0-9a-f]{16}/unreal-report\.json))"
 )
-_CHARACTER_DIRECTORY = re.compile(r"character-motion_(\d{2})(?:-attempt(\d{2}))?")
-_SKELETON_DIRECTORY = re.compile(r"skeleton-motion_(\d{2})(?:-attempt(\d{2}))?")
+_CHARACTER_DIRECTORY = re.compile(r"character-motion_(\d{2})(?:-variant([0-9a-f]{64}))?(?:-attempt(\d{2}))?")
+_SKELETON_DIRECTORY = re.compile(r"skeleton-motion_(\d{2})(?:-variant([0-9a-f]{64}))?(?:-attempt(\d{2}))?")
 _NATIVE_FILE = re.compile(r"motion_(\d{2})(_amass)?\.(npz|bvh|csv|html)")
 _EXPORTS = (
     ("preview_glb", "character-preview.glb", "Animated GLB", "character_preview"),
@@ -39,6 +40,22 @@ _EXPORTS = (
     ("fbx", "animation.fbx", "Animation FBX", "animation"),
     ("blend", "character.blend", "Blender project", "blender_project"),
 )
+
+
+def handoff_directory_name(source_kind: str, sample_index: int, attempt: int = 0,
+                           variant_id: str | None = None) -> str:
+    """Keep native directories stable and isolate each immutable variant's attempts."""
+    if source_kind not in {"character", "skeleton"}:
+        raise ValueError("Unknown handoff source kind")
+    if type(sample_index) is not int or not 0 <= sample_index <= 3:
+        raise ValueError("Sample index must be 0..3")
+    if type(attempt) is not int or not 0 <= attempt <= 99:
+        raise ValueError("Attempt must be 0..99")
+    if variant_id is not None and (not isinstance(variant_id, str) or not re.fullmatch(r"[0-9a-f]{64}", variant_id)):
+        raise ValueError("Expected a managed motion variant ID")
+    return (f"{source_kind}-motion_{sample_index:02d}"
+            + (f"-variant{variant_id}" if variant_id is not None else "")
+            + (f"-attempt{attempt:02d}" if attempt else ""))
 
 
 class Workspace:
@@ -136,7 +153,169 @@ class Workspace:
             "path": path.relative_to(source).as_posix(), "absolute_path": str(path), "uri": path.as_uri(),
             "sha256": checksum, "bytes": path.stat().st_size, "format": path.suffix[1:].lower(),
             "role": role, "sample_index": sample_index, "attempt": attempt, "verified": True,
-            "url": self.file_url(path),
+            "url": self.file_url(path), "variant_id": None,
+        }
+
+    def _motion_dependencies(self, job_id: str, sample_index: int, variant_id: str | None) -> list[Path]:
+        source = self.store.directory(job_id)
+        paths = [source / "manifest.json", source / f"motion_{sample_index:02d}.npz"]
+        if variant_id is not None:
+            directory = source / "variants" / variant_id
+            paths.extend([directory / "request.json", directory / "variant-report.json",
+                          directory / f"motion_{sample_index:02d}.npz"])
+        return paths
+
+    def verified_motion_variant(self, job_id: str, variant_id: str,
+                                sample_index: int | None = None) -> dict[str, Any]:
+        """Bind an immutable edit receipt to its original completed-job manifest."""
+        from .motion_variants import VariantRequest, verify_motion_variant
+        from .motion_variants import variant_id as request_id
+
+        if not isinstance(variant_id, str) or not re.fullmatch(r"[0-9a-f]{64}", variant_id):
+            raise ValueError("Expected a managed motion variant ID")
+        if sample_index is not None and (type(sample_index) is not int or not 0 <= sample_index <= 3):
+            raise ValueError("Sample index must be 0..3")
+        job = self.store.get(job_id)
+        if job["status"] != "completed":
+            raise ValueError("Motion variants require a completed generation job")
+        source = self.store.directory(job_id)
+        directory = source / "variants" / variant_id
+        if any(path.is_symlink() for path in (source, source / "variants", directory)):
+            raise ValueError("Variant directories cannot be symbolic links")
+        request_path = contained_file(source, f"variants/{variant_id}/request.json")
+        if request_path.parent != directory.resolve() or request_path.stat().st_size > 32768:
+            raise ValueError("Variant request is outside its assigned directory or oversized")
+        prepared = VariantRequest.model_validate_json(request_path.read_text(encoding="utf-8"))
+        index = prepared.sample_index
+        if (prepared.job_id != job_id or (sample_index is not None and sample_index != index)
+                or request_id(prepared) != variant_id or Path(prepared.output_directory) != directory.resolve()):
+            raise ValueError("Variant does not belong to this job's selected sample")
+        original = self.verified_native_output(job_id, f"motion_{index:02d}.npz")
+        if Path(prepared.source_path) != Path(original["absolute_path"]) or prepared.source_sha256 != original["sha256"]:
+            raise ValueError("Variant source differs from the selected job's manifest")
+        report_path = contained_file(source, f"variants/{variant_id}/variant-report.json")
+        artifact = contained_file(source, f"variants/{variant_id}/motion_{index:02d}.npz")
+        watched = self._motion_dependencies(job_id, index, variant_id)
+
+        def validate():
+            from .artifacts import _load_motion
+
+            report = verify_motion_variant(directory, prepared)
+            manifest = job.get("manifest", {})
+            original_motion = _load_motion(prepared.source_path)
+            if (original_motion["positions"].shape[:2] != (1, manifest.get("frames"))
+                    or original_motion["fps"] != manifest.get("fps")):
+                raise ValueError("Original variant source timing differs from its completed-job manifest")
+            for key in ("fps", "skeleton", "model"):
+                if manifest.get(key) is not None and (
+                    report[key] != manifest[key] or original_motion[key] != manifest[key]
+                ):
+                    raise ValueError("Variant metadata differs from the selected job's manifest")
+            edit = report["edit"]
+            if (type(manifest.get("frames")) is not int or edit["end_frame_exclusive"] > manifest["frames"]
+                    or report["frames"] != edit["end_frame_exclusive"] - edit["start_frame"]):
+                raise ValueError("Variant timing differs from the original motion range")
+            output = self._output_record(artifact, source, report["artifact"]["sha256"], "motion_variant", index)
+            return {**report, **output, "variant_id": variant_id, "source_kind": "motion-variant",
+                    "report_path": str(report_path), "report_url": self.file_url(report_path),
+                    "source_range": {"start_frame": edit["start_frame"],
+                                     "end_frame_exclusive": edit["end_frame_exclusive"]}}
+
+        return self._cached_validation(report_path, watched, validate)
+
+    def resolve_motion(self, job_id: str, sample_index: int = 0,
+                       variant_id: str | None = None) -> dict[str, Any]:
+        """Resolve a selected NPZ; source_sha256 always means the selected archive.
+
+        original_source_sha256 identifies the native sample for either source kind.
+        Sample indices remain job sample indices; each selected NPZ has one sample.
+        """
+        if type(sample_index) is not int or not 0 <= sample_index <= 3:
+            raise ValueError("Sample index must be 0..3")
+        if variant_id is not None:
+            result = self.verified_motion_variant(job_id, variant_id, sample_index)
+            return {**result, "job_id": job_id, "original_source_sha256": result["source_sha256"],
+                    "source_sha256": result["sha256"]}
+        job = self.store.get(job_id)
+        if job["status"] != "completed":
+            raise ValueError("Motion sources require a completed generation job")
+        output = self.verified_native_output(job_id, f"motion_{sample_index:02d}.npz")
+        manifest = job.get("manifest", {})
+        return {**output, "job_id": job_id, "source_kind": "motion", "source_sha256": output["sha256"],
+                "original_source_sha256": output["sha256"],
+                **{key: manifest.get(key) for key in ("fps", "frames", "skeleton", "model")},
+                "source_range": {"start_frame": 0, "end_frame_exclusive": manifest.get("frames")}, "edit": None}
+
+    def list_motion_variants(self, job_id: str) -> list[dict[str, Any]]:
+        job = self.store.get(job_id)
+        if job["status"] != "completed":
+            return []
+        results = []
+        for directory in sorted((self.store.directory(job_id) / "variants").glob("*")):
+            if not re.fullmatch(r"[0-9a-f]{64}", directory.name) or not directory.is_dir():
+                continue
+            try:
+                results.append(self.verified_motion_variant(job_id, directory.name))
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+                continue
+        return results
+
+    def motion_preview_data(self, job_id: str, sample_index: int = 0,
+                            variant_id: str | None = None) -> dict[str, Any]:
+        """Bounded source-skeleton data shared by the studio and MCP inspectors."""
+        from .artifacts import _load_motion
+        from .motion_variants import VariantEdit, _read
+
+        selected = self.resolve_motion(job_id, sample_index, variant_id)
+        path = Path(selected["absolute_path"])
+        before = path.stat()
+        motion = _load_motion(path)
+        samples, frames, joints, _ = motion["positions"].shape
+        if (samples != 1 or not 1 <= frames <= 2400 or not 1 <= joints <= 77
+                or motion["parents"] is None or "joint_names" not in motion["channels"]
+                or motion["fps"] is None or motion["fps"] != selected["fps"] or frames != selected["frames"]):
+            raise ValueError("Rig preview requires one bounded sample with explicit matching hierarchy and timing")
+        for key in ("skeleton", "model"):
+            if selected.get(key) is not None and motion[key] != selected[key]:
+                raise ValueError("Rig preview metadata differs from its selected source")
+        editable = {
+            "supported": True, "operations": ["trim", "world_placement", "local_joint_adjustment"],
+            "source_depth_limit": 1, "edits_use_original_frames": True,
+            "max_joint_adjustments": 16, "max_blend_frames": 30,
+            "local_rotation_limit_radians": 1.5707963267948966,
+        }
+        try:
+            original = self.store.directory(job_id) / f"motion_{sample_index:02d}.npz"
+            _read(original)
+            if frames < 2:
+                raise ValueError("Editing requires at least two source frames")
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            editable.update(supported=False, operations=[], reason=str(error)[:500])
+        edit = selected.get("edit") or {**VariantEdit().model_dump(mode="json"), "end_frame_exclusive": frames}
+        with path.open("rb") as stream:
+            checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+        after = path.stat()
+        if checksum != selected["sha256"] or (
+            before.st_size, before.st_mtime_ns, before.st_ctime_ns, before.st_ino
+        ) != (after.st_size, after.st_mtime_ns, after.st_ctime_ns, after.st_ino):
+            raise ValueError("Motion changed while loading rig preview data")
+        if variant_id is not None:
+            refreshed = self.resolve_motion(job_id, sample_index, variant_id)
+            if (refreshed["sha256"] != selected["sha256"]
+                    or refreshed["original_source_sha256"] != selected["original_source_sha256"]):
+                raise ValueError("Variant provenance changed while loading rig preview data")
+        return {
+            "job_id": job_id, "sample_index": sample_index, "variant_id": variant_id,
+            "source_sha256": checksum, "artifact_sha256": checksum,
+            "original_source_sha256": selected["original_source_sha256"],
+            "fps": motion["fps"], "frames": frames, "model": motion["model"], "skeleton": motion["skeleton"],
+            "joint_names": motion["names"], "joint_parents": motion["parents"],
+            "positions": motion["positions"][0].tolist(),
+            "source_range": selected["source_range"], "edit": edit,
+            "contact_status": selected.get("contact_status", "preserved_source_predictions"
+                                           if motion["contacts"] is not None else "unavailable"),
+            "editable": editable, "frame_range_convention": "zero_based_half_open",
+            "coordinates": {"units": "meters", "up_axis": "Y", "forward_axis": "Z"},
         }
 
     def _verified_character(self, report_path: Path, source: Path, job: dict) -> dict[str, Any]:
@@ -145,7 +324,7 @@ class Workspace:
         match = _CHARACTER_DIRECTORY.fullmatch(report_path.parent.name)
         if match is None:
             raise ValueError("Unexpected character handoff directory")
-        index, attempt = int(match[1]), int(match[2] or 0)
+        index, variant_id, attempt = int(match[1]), match[2], int(match[3] or 0)
         manifest = job.get("manifest", {})
         if job["status"] != "completed" or not 0 <= index < manifest.get("samples", 0):
             raise ValueError("Preview sample is outside this completed job")
@@ -157,19 +336,19 @@ class Workspace:
         if report_path.parent != directory.resolve() or directory.is_symlink():
             raise ValueError("Preview report must stay in its own handoff")
         prepared = _read_json(request_path)
-        name = f"motion_{index:02d}.npz"
-        entries = [item for item in manifest.get("artifacts", []) if item.get("path") == name]
-        motion = contained_file(source, name)
+        selected = self.resolve_motion(job["id"], index, variant_id)
+        motion = Path(selected["absolute_path"])
         if (
-            len(entries) != 1 or prepared.get("kind") != "character"
+            prepared.get("kind") != "character"
             or prepared.get("schema_version") != 1 or type(prepared.get("sample_index")) is not int
-            or prepared["sample_index"] != index or prepared.get("source_sha256") != entries[0].get("sha256")
+            or prepared["sample_index"] != index or prepared.get("source_sha256") != selected["sha256"]
+            or prepared.get("variant_id") != variant_id
             or not isinstance(prepared.get("source_motion"), str) or Path(prepared["source_motion"]) != motion
-            or prepared.get("fps") != manifest.get("fps") or prepared.get("frames") != manifest.get("frames")
+            or prepared.get("fps") != selected["fps"] or prepared.get("frames") != selected["frames"]
         ):
             raise ValueError("Preview does not belong to this job's selected motion sample")
         character = Path(prepared["character_fbx"])
-        watched = [source / "manifest.json", report_path, request_path, motion, character,
+        watched = [*self._motion_dependencies(job["id"], index, variant_id), report_path, request_path, character,
                    *(directory / filename for _, filename, _, _ in _EXPORTS)]
 
         def validate():
@@ -180,12 +359,14 @@ class Workspace:
                 path = Path(report[field + "_path"])
                 output = self._output_record(path, source, report[field + "_sha256"], role, index, attempt)
                 output["source_kind"] = "character"
+                output["variant_id"] = variant_id
                 if output["url"] is None:
                     raise ValueError("Preview export is not a managed studio artifact")
                 outputs.append(output)
                 exports.append({"label": label, "url": output["url"]})
             return {
-                "preview": {"sample_index": index, "url": exports[0]["url"], "attempt": attempt, "exports": exports},
+                "preview": {"sample_index": index, "url": exports[0]["url"], "attempt": attempt, "exports": exports,
+                            **({"variant_id": variant_id} if variant_id is not None else {})},
                 "outputs": outputs,
             }
         return self._cached_validation(report_path, watched, validate)
@@ -196,7 +377,7 @@ class Workspace:
         match = _SKELETON_DIRECTORY.fullmatch(report_path.parent.name)
         if match is None:
             raise ValueError("Unexpected skeleton handoff directory")
-        index, attempt = int(match[1]), int(match[2] or 0)
+        index, variant_id, attempt = int(match[1]), match[2], int(match[3] or 0)
         manifest = job.get("manifest", {})
         if job["status"] != "completed" or not 0 <= index < manifest.get("samples", 0):
             raise ValueError("Skeleton sample is outside this completed job")
@@ -208,15 +389,19 @@ class Workspace:
         if report_path.parent != directory.resolve() or directory.is_symlink():
             raise ValueError("Skeleton report must stay in its own handoff")
         prepared = _read_json(request_path)
+        selected = self.resolve_motion(job["id"], index, variant_id) if variant_id is not None else manifest
         if (prepared.get("kind") != "blender" or prepared.get("schema_version") != 1
                 or not isinstance(prepared.get("source_bvh"), str)
-                or prepared.get("fps") != manifest.get("fps") or prepared.get("frames") != manifest.get("frames")
-                or prepared.get("skeleton") != manifest.get("skeleton")):
+                or prepared.get("variant_id") != variant_id
+                or prepared.get("fps") != selected.get("fps") or prepared.get("frames") != selected.get("frames")
+                or prepared.get("skeleton") != selected.get("skeleton")):
             raise ValueError("Skeleton export does not belong to this job's selected motion sample")
         motion = Path(prepared["source_bvh"])
         name = f"motion_{index:02d}.bvh"
         dependencies = []
         if motion == source / name:
+            if variant_id is not None:
+                raise ValueError("A variant skeleton handoff requires a converted variant BVH")
             entries = [item for item in manifest.get("artifacts", []) if item.get("path") == name]
             motion = contained_file(source, name)
             if len(entries) != 1 or prepared.get("source_sha256") != entries[0].get("sha256"):
@@ -230,10 +415,11 @@ class Workspace:
             # Its immutable input/receipt files also invalidate the handoff cache.
             converted = self.verified_motion_export(job["id"], match[1], sample_index=index)
             if (converted["format"] != "bvh" or Path(converted["absolute_path"]) != motion
-                    or prepared.get("source_sha256") != converted["sha256"]):
+                    or prepared.get("source_sha256") != converted["sha256"]
+                    or converted.get("variant_id") != variant_id):
                 raise ValueError("Skeleton export differs from its verified converted BVH")
             export_report = Path(converted["report_path"])
-            dependencies = [source / f"motion_{index:02d}.npz", export_report,
+            dependencies = [*self._motion_dependencies(job["id"], index, variant_id), export_report,
                             export_report.with_name("request.json")]
         watched = [source / "manifest.json", report_path, request_path, motion,
                    directory / "animation.fbx", directory / "animation.blend", *dependencies]
@@ -246,8 +432,9 @@ class Workspace:
                 output = self._output_record(Path(report[key + "_path"]), source, report[key + "_sha256"],
                                              role, index, attempt)
                 output["source_kind"] = "skeleton"
+                output["variant_id"] = variant_id
                 outputs.append(output)
-            return {"sample_index": index, "attempt": attempt, "outputs": outputs}
+            return {"sample_index": index, "attempt": attempt, "variant_id": variant_id, "outputs": outputs}
 
         return self._cached_validation(report_path, watched, validate)
 
@@ -267,18 +454,22 @@ class Workspace:
                 except (OSError, ValueError, KeyError, TypeError, RuntimeError):
                     continue
                 preview = result["preview"]
-                previous = latest.get(preview["sample_index"])
+                key = (preview["sample_index"], preview.get("variant_id"))
+                previous = latest.get(key)
                 if previous is None or preview["attempt"] > previous["preview"]["attempt"]:
-                    latest[preview["sample_index"]] = result
+                    latest[key] = result
         return list(latest.values())
 
     def job_details(self, job_id: str) -> dict[str, Any]:
         job = self.store.get(job_id)
-        job["previews"] = [result["preview"] for result in self._latest_character(job)]
+        previews = [result["preview"] for result in self._latest_character(job)]
+        job["previews"] = [preview for preview in previews if preview.get("variant_id") is None]
+        job["variant_previews"] = [preview for preview in previews if preview.get("variant_id") is not None]
+        job["variants"] = self.list_motion_variants(job_id)
         if job["status"] == "completed":
             source = self.store.directory(job_id)
             job["downloads"] = [
-                {**item, "url": self.file_url(source / item["path"])}
+                {**item, "url": self.file_url(source / item["path"]), "variant_id": None}
                 for item in job.get("manifest", {}).get("artifacts", [])
             ]
         return job
@@ -312,7 +503,7 @@ class Workspace:
                                    "amass" if match[2] else "motion", int(match[1]))
 
     def verified_motion_export(
-        self, job_id: str, export_id: str, sample_index: int | None = None,
+        self, job_id: str, export_id: str, sample_index: int | None = None, variant_id: str | None = None,
     ) -> dict[str, Any]:
         """Bind a conversion receipt to this completed job's current source manifest."""
         from .export import ExportRequest, verify_export
@@ -322,6 +513,8 @@ class Workspace:
             raise ValueError("Expected a managed motion export ID")
         if sample_index is not None and (type(sample_index) is not int or not 0 <= sample_index <= 3):
             raise ValueError("Sample index must be 0..3")
+        if variant_id is not None and (not isinstance(variant_id, str) or not re.fullmatch(r"[0-9a-f]{64}", variant_id)):
+            raise ValueError("Expected a managed motion variant ID")
         job = self.store.get(job_id)
         if job["status"] != "completed":
             raise ValueError("Motion exports require a completed generation job")
@@ -337,25 +530,23 @@ class Workspace:
         index = prepared.sample_index
         if (prepared.job_id != job_id or type(manifest.get("samples")) is not int
                 or not 0 <= index < manifest["samples"] or (sample_index is not None and sample_index != index)
+                or (variant_id is not None and prepared.variant_id != variant_id)
                 or request_id(prepared) != export_id or Path(prepared.output_directory) != directory.resolve()):
             raise ValueError("Motion export does not belong to this job's selected sample")
-        name = f"motion_{index:02d}.npz"
-        motion = contained_file(source, name)
-        entries = [item for item in manifest.get("artifacts", []) if item.get("path") == name]
-        if (len(entries) != 1 or Path(prepared.source_path) != motion
-                or prepared.source_sha256 != entries[0].get("sha256")
-                or type(entries[0].get("bytes")) is not int or entries[0]["bytes"] != motion.stat().st_size
-                or ("sample_index" in entries[0] and entries[0]["sample_index"] != index)):
+        selected = self.resolve_motion(job_id, index, prepared.variant_id)
+        motion = Path(selected["absolute_path"])
+        if Path(prepared.source_path) != motion or prepared.source_sha256 != selected["sha256"]:
             raise ValueError("Motion export source differs from the selected job's manifest")
         artifact = directory / prepared.basename
         report_path = directory / "export-report.json"
-        watched = [source / "manifest.json", source / name, directory / "request.json", report_path, artifact]
+        watched = [*self._motion_dependencies(job_id, index, prepared.variant_id),
+                   directory / "request.json", report_path, artifact]
 
         def validate():
             report = verify_export(directory, prepared)
-            if (report["frames"] != manifest.get("frames") or report["fps"] != manifest.get("fps")
-                    or report["skeleton"] != manifest.get("skeleton")
-                    or (manifest.get("model") is not None and report["model"] != manifest["model"])):
+            if (report["frames"] != selected.get("frames") or report["fps"] != selected.get("fps")
+                    or report["skeleton"] != selected.get("skeleton")
+                    or (selected.get("model") is not None and report["model"] != selected["model"])):
                 raise ValueError("Motion export timing or skeleton differs from the selected job's manifest")
             output = self._output_record(artifact, source, report["artifact"]["sha256"],
                                          "amass" if prepared.format == "amass" else "motion", index)
@@ -364,6 +555,7 @@ class Workspace:
                 source_sha256=prepared.source_sha256, fps=report["fps"], frames=report["frames"],
                 skeleton=report["skeleton"], model=report["model"], options=report["options"],
                 coordinates=report["coordinates"], report_path=str(report_path), report_url=self.file_url(report_path),
+                variant_id=prepared.variant_id,
             )
             return output
 
@@ -380,6 +572,7 @@ class Workspace:
                        for item in job.get("manifest", {}).get("artifacts", [])]
             for result in self._latest_character(job):
                 outputs.extend(result["outputs"])
+            outputs.extend(self.list_motion_variants(job_id))
             source = self.store.directory(job_id)
             latest_skeleton = {}
             for report_path in sorted((source / "handoffs").glob("skeleton-motion_*/blender-report.json")):
@@ -387,9 +580,10 @@ class Workspace:
                     result = self._verified_skeleton(report_path, source, job)
                 except (OSError, ValueError, KeyError, TypeError, RuntimeError):
                     continue
-                previous = latest_skeleton.get(result["sample_index"])
+                key = (result["sample_index"], result.get("variant_id"))
+                previous = latest_skeleton.get(key)
                 if previous is None or result["attempt"] > previous["attempt"]:
-                    latest_skeleton[result["sample_index"]] = result
+                    latest_skeleton[key] = result
             for result in latest_skeleton.values():
                 outputs.extend(result["outputs"])
             for directory in sorted((source / "exports").glob("*")):
@@ -403,7 +597,7 @@ class Workspace:
 
     def build_character_preview(
         self, job_id: str, sample_index: int = 0, attempt: int | None = None, *,
-        prepare: Callable[..., Any], execute: Callable[..., Any],
+        prepare: Callable[..., Any], execute: Callable[..., Any], variant_id: str | None = None,
     ) -> dict[str, Any]:
         if type(sample_index) is not int or not 0 <= sample_index <= 3:
             raise ValueError("Sample index must be 0..3")
@@ -413,32 +607,41 @@ class Workspace:
         if job["status"] != "completed" or sample_index >= job.get("manifest", {}).get("samples", 0):
             raise ValueError("Choose a sample from a completed generation job")
         source = self.store.directory(job_id)
-        lock = FileLock(str(source / f".character-preview-{sample_index:02d}.lock"), timeout=0)
+        stem = handoff_directory_name("character", sample_index, variant_id=variant_id)
+        if variant_id is not None:
+            self.resolve_motion(job_id, sample_index, variant_id)
+        lock_suffix = f"-variant{variant_id}" if variant_id is not None else ""
+        lock = FileLock(str(source / f".character-preview-{sample_index:02d}{lock_suffix}.lock"), timeout=0)
         try:
             with lock:
                 base = source / "handoffs"
                 if attempt is None:
                     matches = [item["preview"] for item in self._latest_character(job)
-                               if item["preview"]["sample_index"] == sample_index]
+                               if item["preview"]["sample_index"] == sample_index
+                               and item["preview"].get("variant_id") == variant_id]
                     if matches:
                         return {**matches[-1], "reused": True}
-                    for pending in base.glob(f"character-motion_{sample_index:02d}*"):
+                    for pending in base.glob(stem + "*"):
+                        match = _CHARACTER_DIRECTORY.fullmatch(pending.name)
+                        if match is None or match[2] != variant_id:
+                            continue
                         if any((pending / marker).exists() for marker in ("bridge-dispatch.json", "execution.lock")) and not (
                             pending / "blender-report.json"
                         ).exists():
                             raise ValueError("A character export may still be running. Inspect the pending handoff before retrying.")
                     for candidate in range(100):
-                        suffix = f"-attempt{candidate:02d}" if candidate else ""
-                        if not (base / f"character-motion_{sample_index:02d}{suffix}").exists():
+                        name = handoff_directory_name("character", sample_index, candidate, variant_id)
+                        if not (base / name).exists():
                             attempt = candidate
                             break
                     else:
                         raise ValueError("All preview attempts are occupied")
-                suffix = f"-attempt{attempt:02d}" if attempt else ""
-                report_path = base / f"character-motion_{sample_index:02d}{suffix}" / "blender-report.json"
+                report_path = base / handoff_directory_name("character", sample_index, attempt, variant_id) / "blender-report.json"
                 if report_path.exists():
                     return {**self.verified_preview(report_path, source, job), "reused": True}
                 arguments = {"job_id": job_id, "sample_index": sample_index, "attempt": attempt}
+                if variant_id is not None:
+                    arguments["variant_id"] = variant_id
                 prepare(**arguments)
                 execute(**arguments, source_kind="character")
                 return {**self.verified_preview(report_path, source, self.store.get(job_id)), "reused": False}

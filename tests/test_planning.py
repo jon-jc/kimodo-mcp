@@ -166,7 +166,7 @@ def test_empty_ambiguous_or_unsupported_revision_rejected(fields):
 
 def test_pose_reference_is_bounded_and_keeps_brief_separate():
     reference = PoseReference(job_id="a" * 32, frame=2399, sample_index=3)
-    assert reference.model_dump() == {"job_id": "a" * 32, "frame": 2399, "sample_index": 3}
+    assert reference.model_dump() == {"job_id": "a" * 32, "frame": 2399, "sample_index": 3, "variant_id": None}
     assert "start_from" not in AnimationBrief.model_fields
 
 

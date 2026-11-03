@@ -82,7 +82,10 @@ def _prepare(kind: str, output_directory: Path, request: dict[str, Any]) -> Hand
         # Exact repeat calls return the same files; no existing file is replaced.
         if config.is_symlink() or script.is_symlink() or not config.is_file() or not script.is_file():
             raise FileExistsError("Handoff directory already exists without a complete matching preparation.")
-        if config.read_text(encoding="utf-8") != request_text or script.read_text(encoding="utf-8") != template:
+        if (
+            config.read_text(encoding="utf-8") != request_text
+            or script.read_text(encoding="utf-8") != template
+        ):
             raise FileExistsError("Handoff directory contains a different request or script version.")
     else:
         output.mkdir(parents=True, exist_ok=False)
@@ -91,17 +94,114 @@ def _prepare(kind: str, output_directory: Path, request: dict[str, Any]) -> Hand
         with script.open("x", encoding="utf-8", newline="\n") as stream:
             stream.write(template)
     return HandoffResult(
-        kind=kind, directory=str(output), script_path=str(script), request_path=str(config),
+        kind=kind,
+        directory=str(output),
+        script_path=str(script),
+        request_path=str(config),
         report_path=str(output / ("unreal-report.json" if kind == "unreal" else "blender-report.json")),
-        execution=("Run this exact script with Blender's Python or its existing MCP connection."
-                   if kind != "unreal" else
-                   "Run this exact script through Unreal Editor Python in the intended project."),
+        execution=(
+            "Run this exact script with Blender's Python or its existing MCP connection."
+            if kind != "unreal"
+            else "Run this exact script through Unreal Editor Python in the intended project."
+        ),
     )
 
 
+def _selector(value: str | None, name: str) -> None:
+    if value is not None and (not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)):
+        raise ValueError(f"{name} must be a lowercase 64-character managed ID.")
+
+
+def _variant_motion(
+    path: Path, variant_id: str, sample_index: int, checksum: str, fps: float, frames: int
+) -> dict:
+    from .motion_variants import verify_motion_variant
+
+    _selector(variant_id, "variant_id")
+    source = path.resolve()
+    if source.parent.name != variant_id or source.parent.parent.name != "variants":
+        raise ValueError("Motion path does not belong to the selected variant.")
+    report = verify_motion_variant(source.parent)
+    if (
+        report["variant_id"] != variant_id
+        or report["sample_index"] != sample_index
+        or Path(report["artifact"]["absolute_path"]).resolve() != source
+        or report["artifact"]["sha256"] != checksum
+        or report["fps"] != fps
+        or report["frames"] != frames
+    ):
+        raise ValueError("Selected variant differs from the supplied sample, checksum or timing.")
+    return report
+
+
+def _variant_destination(directory: Path, job: Path, kind: str, sample: int, variant_id: str) -> None:
+    output = directory.resolve()
+    prefix = f"{kind}-motion_{sample:02d}-variant{variant_id}"
+    if (
+        not output.is_relative_to(job.resolve())
+        or output.parent != (job / "handoffs").resolve()
+        or not re.fullmatch(re.escape(prefix) + r"(?:-attempt(?:0[1-9]|[1-9][0-9]))?", output.name)
+    ):
+        raise ValueError("Variant handoff directory must identify the same job, sample, variant and attempt.")
+
+
+def _variant_bvh(
+    path: Path,
+    output: Path,
+    *,
+    variant_id: str,
+    export_id: str | None,
+    sample_index: int,
+    checksum: str,
+    fps: float,
+    frames: int,
+    skeleton: str,
+) -> dict:
+    from .export import verify_export
+
+    _selector(variant_id, "variant_id")
+    _selector(export_id, "export_id")
+    source = path.resolve()
+    if export_id is None or source.parent.name != export_id or source.parent.parent.name != "exports":
+        raise ValueError("A variant skeleton handoff requires its selected managed BVH export_id.")
+    report = verify_export(source.parent)
+    if (
+        report.get("variant_id") != variant_id
+        or report["sample_index"] != sample_index
+        or report["options"]["format"] != "bvh"
+        or report["artifact"]["sha256"] != checksum
+        or Path(report["artifact"]["absolute_path"]).resolve() != source
+        or report["fps"] != fps
+        or report["frames"] != frames
+        or report["skeleton"] != skeleton
+    ):
+        raise ValueError("BVH export does not match the selected variant, sample or timing.")
+    job = source.parents[2]
+    variant = _variant_motion(
+        job / "variants" / variant_id / f"motion_{sample_index:02d}.npz",
+        variant_id,
+        sample_index,
+        report["source_sha256"],
+        fps,
+        frames,
+    )
+    if variant["job_id"] != report["job_id"] or variant["skeleton"] != skeleton:
+        raise ValueError("Export and variant do not belong to the same source job and skeleton.")
+    _variant_destination(output, job, "skeleton", sample_index, variant_id)
+    return variant
+
+
 def prepare_blender_handoff(
-    bvh_path: Path, output_directory: Path, *, fps: float, frames: int,
-    source_sha256: str, skeleton: str,
+    bvh_path: Path,
+    output_directory: Path,
+    *,
+    fps: float,
+    frames: int,
+    source_sha256: str,
+    skeleton: str,
+    variant_id: str | None = None,
+    export_id: str | None = None,
+    sample_index: int = 0,
 ) -> HandoffResult:
     """Resolve a verified job BVH and prepare standalone Blender import/export files.
 
@@ -109,11 +209,28 @@ def prepare_blender_handoff(
     must obtain fps, frames, skeleton and checksum from the completed job manifest.
     No paths from prompt text should be substituted for the verified artifact.
     """
-    if fps != 30 or not isinstance(frames, int) or not 2 <= frames <= 2400:
+    if fps != 30 or type(frames) is not int or not 2 <= frames <= 2400:
         raise ValueError("This handoff requires canonical 30 FPS and 2..2400 frames.")
     if skeleton not in {"somaskel30", "somaskel77"}:
         raise ValueError("The Blender BVH handoff currently supports the SOMA skeleton only.")
     source = _source(bvh_path, ".bvh", source_sha256)
+    _selector(variant_id, "variant_id")
+    _selector(export_id, "export_id")
+    if type(sample_index) is not int or not 0 <= sample_index <= 3:
+        raise ValueError("Sample index must be an integer between 0 and 3.")
+    variant = None
+    if variant_id is not None:
+        variant = _variant_bvh(
+            source,
+            output_directory,
+            variant_id=variant_id,
+            export_id=export_id,
+            sample_index=sample_index,
+            checksum=source_sha256,
+            fps=fps,
+            frames=frames,
+            skeleton=skeleton,
+        )
     if source.stat().st_size > 128 * 1024 * 1024:
         raise ValueError("BVH exceeds the handoff size limit.")
     text = source.read_text(encoding="utf-8")
@@ -124,17 +241,39 @@ def prepare_blender_handoff(
     if abs(float(time_match[1]) - 1 / fps) > 1e-6:
         raise ValueError("BVH frame interval differs from the job manifest.")
     request = {
-        "schema_version": 1, "kind": "blender", "source_bvh": str(source),
-        "source_sha256": source_sha256, "skeleton": skeleton, "fps": float(fps),
-        "frames": frames, "armature_name": "KimodoRig", "source_units": "centimeters",
-        "source_up": "Y", "source_forward": "Z",
+        "schema_version": 1,
+        "kind": "blender",
+        "source_bvh": str(source),
+        "source_sha256": source_sha256,
+        "skeleton": skeleton,
+        "fps": float(fps),
+        "frames": frames,
+        "armature_name": "KimodoRig",
+        "source_units": "centimeters",
+        "source_up": "Y",
+        "source_forward": "Z",
     }
+    if variant is not None:
+        request.update(
+            variant_id=variant_id,
+            export_id=export_id,
+            sample_index=sample_index,
+            variant_source_sha256=variant["artifact"]["sha256"],
+            original_source_sha256=variant["source_sha256"],
+        )
     return _prepare("blender", output_directory, request)
 
 
 def prepare_character_handoff(
-    character_fbx: Path, motion_npz: Path, output_directory: Path, *,
-    source_sha256: str, fps: float, frames: int, sample_index: int = 0,
+    character_fbx: Path,
+    motion_npz: Path,
+    output_directory: Path,
+    *,
+    source_sha256: str,
+    fps: float,
+    frames: int,
+    sample_index: int = 0,
+    variant_id: str | None = None,
 ) -> HandoffResult:
     """Prepare the inspected character's fitted rig and managed SOMA animation.
 
@@ -151,6 +290,13 @@ def prepare_character_handoff(
         raise ValueError("Sample index must identify one of the job's four possible samples.")
     character = validate_target(character_fbx)
     motion = _source(motion_npz, ".npz", source_sha256)
+    _selector(variant_id, "variant_id")
+    variant = None
+    if variant_id is not None:
+        variant = _variant_motion(motion, variant_id, sample_index, source_sha256, fps, frames)
+        _variant_destination(output_directory, motion.parents[2], "character", sample_index, variant_id)
+    elif motion.parent.parent.name == "variants":
+        raise ValueError("A managed variant source requires an explicit variant_id.")
     summary = inspect_motion(motion)
     if summary["fps"] != fps or summary["frames"] != frames:
         raise ValueError("Motion timing differs from the completed job manifest.")
@@ -159,16 +305,31 @@ def prepare_character_handoff(
     if summary["samples"] != 1:
         raise ValueError("Resolve one per-sample job artifact before preparing a character handoff.")
     request = {
-        "schema_version": 1, "kind": "character", "character_fbx": str(character),
-        "character_sha256": SOURCE_SHA256, "source_motion": str(motion),
-        "source_sha256": source_sha256, "fps": float(fps), "frames": frames,
+        "schema_version": 1,
+        "kind": "character",
+        "character_fbx": str(character),
+        "character_sha256": SOURCE_SHA256,
+        "source_motion": str(motion),
+        "source_sha256": source_sha256,
+        "fps": float(fps),
+        "frames": frames,
         "sample_index": sample_index,
     }
+    if variant is not None:
+        request.update(
+            variant_id=variant_id,
+            original_source_sha256=variant["source_sha256"],
+            contact_status=variant["contact_status"],
+        )
     return _prepare("character", output_directory, request)
 
 
 def prepare_unreal_handoff(
-    blender_report_path: Path, output_directory: Path, *, target: UnrealTarget,
+    blender_report_path: Path,
+    output_directory: Path,
+    *,
+    target: UnrealTarget,
+    variant_id: str | None = None,
 ) -> HandoffResult:
     """Prepare animation-only import from a successful, checksummed Blender export.
 
@@ -179,9 +340,68 @@ def prepare_unreal_handoff(
     if report_path.stat().st_size > 1024 * 1024:
         raise ValueError("Blender report exceeds the handoff size limit.")
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    if report.get("schema_version") != 1 or report.get("status") != "completed" or report.get("kind") != "blender":
+    _selector(variant_id, "variant_id")
+    if variant_id is not None:
+        match = re.fullmatch(
+            r"(character|skeleton)-motion_(0[0-3])-variant([0-9a-f]{64})(?:-attempt(?:0[1-9]|[1-9][0-9]))?",
+            report_path.parent.name,
+        )
+        if match is None or match[3] != variant_id or int(match[2]) > 3:
+            raise ValueError("Blender report belongs to a different variant handoff.")
+        prepared = report_path.parent / "handoff.json"
+        if not prepared.is_file() or prepared.stat().st_size > 65536:
+            raise ValueError("Variant Blender preparation is missing or oversized.")
+        configuration = json.loads(prepared.read_text(encoding="utf-8"))
+        if (
+            configuration.get("variant_id") != variant_id
+            or configuration.get("schema_version") != 1
+            or configuration.get("kind") != ("character" if match[1] == "character" else "blender")
+            or configuration.get("sample_index") != int(match[2])
+        ):
+            raise ValueError("Blender preparation differs from the selected variant.")
+        if output_directory.resolve().parent != report_path.parent:
+            raise ValueError("Unreal variant handoff must remain inside its Blender handoff.")
+        if match[1] == "character":
+            variant = _variant_motion(
+                Path(configuration["source_motion"]),
+                variant_id,
+                int(match[2]),
+                configuration["source_sha256"],
+                report["fps"],
+                report["frames"],
+            )
+            _variant_destination(
+                report_path.parent,
+                Path(configuration["source_motion"]).resolve().parents[2],
+                "character",
+                int(match[2]),
+                variant_id,
+            )
+        else:
+            variant = _variant_bvh(
+                Path(configuration["source_bvh"]),
+                report_path.parent,
+                variant_id=variant_id,
+                export_id=configuration.get("export_id"),
+                sample_index=int(match[2]),
+                checksum=configuration["source_sha256"],
+                fps=report["fps"],
+                frames=report["frames"],
+                skeleton=configuration["skeleton"],
+            )
+        if report.get("source_sha256") != configuration["source_sha256"]:
+            raise ValueError("Blender report source differs from the selected variant preparation.")
+    if (
+        report.get("schema_version") != 1
+        or report.get("status") != "completed"
+        or report.get("kind") != "blender"
+    ):
         raise ValueError("A completed Blender handoff report is required.")
-    if report.get("fps") != 30 or not isinstance(report.get("frames"), int) or not 2 <= report["frames"] <= 2400:
+    if (
+        report.get("fps") != 30
+        or not isinstance(report.get("frames"), int)
+        or not 2 <= report["frames"] <= 2400
+    ):
         raise ValueError("Blender report contains invalid timing.")
     fbx = _source(Path(report["fbx_path"]), ".fbx", report["fbx_sha256"])
     if fbx.parent != report_path.parent or fbx.name != "animation.fbx":
@@ -204,10 +424,21 @@ def prepare_unreal_handoff(
     if roots != 1:
         raise ValueError("FBX hierarchy must have exactly one root.")
     request = {
-        "schema_version": 1, "kind": "unreal", "source_fbx": str(fbx),
-        "source_sha256": report["fbx_sha256"], "blender_report": str(report_path),
-        "blender_report_sha256": _digest(report_path), "fps": float(report["fps"]),
-        "frames": report["frames"], "expected_bones": bones,
+        "schema_version": 1,
+        "kind": "unreal",
+        "source_fbx": str(fbx),
+        "source_sha256": report["fbx_sha256"],
+        "blender_report": str(report_path),
+        "blender_report_sha256": _digest(report_path),
+        "fps": float(report["fps"]),
+        "frames": report["frames"],
+        "expected_bones": bones,
         "target": target.model_dump(mode="json"),
     }
+    if variant_id is not None:
+        request.update(
+            variant_id=variant_id,
+            variant_source_sha256=variant["artifact"]["sha256"],
+            original_source_sha256=variant["source_sha256"],
+        )
     return _prepare("unreal", output_directory, request)

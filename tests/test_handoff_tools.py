@@ -30,7 +30,7 @@ def test_managed_handoff_attempts_and_missing_reports(tmp_path):
 def test_character_configuration_never_comes_from_tool_arguments(tmp_path):
     server = create_server(Settings(tmp_path, sys.executable))
     tool = server._tool_manager.get_tool("prepare_character_handoff")
-    assert set(tool.parameters["properties"]) == {"job_id", "sample_index", "attempt"}
+    assert set(tool.parameters["properties"]) == {"job_id", "sample_index", "attempt", "variant_id"}
 
 
 def test_unreal_execution_resolves_managed_script_and_operator_engine(tmp_path, monkeypatch):
@@ -57,6 +57,6 @@ def test_unreal_execution_resolves_managed_script_and_operator_engine(tmp_path, 
     calls = []
     monkeypatch.setattr(unreal_bridge, "execute_handoff", lambda *args: calls.append(args) or {"status": "completed"})
     tool = create_server(settings)._tool_manager.get_tool("execute_unreal_handoff")
-    assert set(tool.parameters["properties"]) == {"job_id", "target", "source_kind", "sample_index", "attempt"}
+    assert set(tool.parameters["properties"]) == {"job_id", "target", "source_kind", "sample_index", "attempt", "variant_id"}
     assert tool.fn(job["id"], target, "character")["status"] == "completed"
     assert calls == [(script.resolve(), engine, Path(target.project_file))]

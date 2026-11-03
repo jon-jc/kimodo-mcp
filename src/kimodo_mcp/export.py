@@ -32,6 +32,7 @@ class ExportRequest(BaseModel):
     schema_version: Literal[1] = 1
     job_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]
     sample_index: Annotated[int, Field(ge=0, le=3)] = 0
+    variant_id: SHA | None = None
     source_path: str
     source_sha256: SHA
     output_directory: str
@@ -75,18 +76,29 @@ def export_id(request: ExportRequest) -> str:
         "sample_index": request.sample_index,
         **request.options(),
     }
+    if request.variant_id is not None:
+        payload["variant_id"] = request.variant_id
     return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _paths(request: ExportRequest) -> tuple[Path, Path]:
     source = Path(request.source_path).resolve()
     output = Path(request.output_directory).resolve()
-    expected = source.parent / "exports" / export_id(request)
+    job_directory = source.parent
+    if request.variant_id is not None:
+        if (source.parent.name != request.variant_id or source.parent.parent.name != "variants"
+                or any(path.is_symlink() for path in (
+                    Path(request.source_path), Path(request.source_path).parent,
+                    Path(request.source_path).parent.parent, Path(request.source_path).parent.parent.parent,
+                ))):
+            raise ValueError("Variant exports require their assigned managed variant source.")
+        job_directory = source.parents[2]
+    expected = job_directory / "exports" / export_id(request)
     if (
         source.name != f"motion_{request.sample_index:02d}.npz"
-        or source.parent.name != request.job_id
+        or job_directory.name != request.job_id
         or output != expected
-        or not output.is_relative_to(source.parent)
+        or not output.is_relative_to(job_directory)
     ):
         raise ValueError("Export paths must be assigned inside the source job directory.")
     return source, output
@@ -100,6 +112,15 @@ def load_source(request: ExportRequest) -> dict:
         or digest(source) != request.source_sha256
     ):
         raise ValueError("Source motion is missing, oversized or differs from its completed-job digest.")
+    if request.variant_id is not None:
+        from .motion_variants import verify_motion_variant
+
+        report = verify_motion_variant(source.parent)
+        if (report["job_id"] != request.job_id or report["sample_index"] != request.sample_index
+                or report["variant_id"] != request.variant_id
+                or Path(report["artifact"]["absolute_path"]) != source
+                or report["artifact"]["sha256"] != request.source_sha256):
+            raise ValueError("Export source differs from the verified motion variant.")
     motion = _load_motion(source)
     samples, frames, joints, _ = motion["positions"].shape
     if samples != 1 or not 1 <= frames <= 2400:
@@ -210,6 +231,7 @@ def make_report(request: ExportRequest, motion: dict, artifact: Path) -> dict:
         "reviewed_upstream_revision": UPSTREAM_REVISION,
         "job_id": request.job_id,
         "sample_index": request.sample_index,
+        **({"variant_id": request.variant_id} if request.variant_id is not None else {}),
         "source_path": Path(request.source_path).name,
         "source_sha256": request.source_sha256,
         "model": motion["model"],
@@ -289,6 +311,7 @@ def export_motion(
     job_id: str,
     format: Literal["bvh", "amass", "csv"],
     sample_index: int = 0,
+    variant_id: str | None = None,
     bvh_standard_tpose: bool = False,
     amass_z_up: bool = True,
     mujoco_rest_zero: bool = False,
@@ -305,15 +328,17 @@ def export_motion(
         source_sha256=source_sha256,
         job_id=job_id,
         sample_index=sample_index,
+        variant_id=variant_id,
         format=format,
         bvh_standard_tpose=bvh_standard_tpose,
         amass_z_up=amass_z_up,
         mujoco_rest_zero=mujoco_rest_zero,
     )
-    directory = source.parent / "exports" / export_id(request)
+    job_directory = source.parents[2] if variant_id is not None else source.parent
+    directory = job_directory / "exports" / export_id(request)
     request = request.model_copy(update={"output_directory": str(directory)})
     _paths(request)
-    lock = FileLock(str(source.parent / f".export-{export_id(request)}.lock"), timeout=0)
+    lock = FileLock(str(job_directory / f".export-{export_id(request)}.lock"), timeout=0)
     try:
         with lock:
             if directory.exists():
@@ -322,7 +347,7 @@ def export_motion(
                 raise ValueError("An incomplete export attempt exists; inspect it before retrying.")
             load_source(request)
             directory.mkdir(parents=True)
-            atomic_json(directory / "request.json", request.model_dump())
+            atomic_json(directory / "request.json", request.model_dump(exclude_none=True))
             atomic_json(
                 directory / "attempt.json",
                 {"status": "started", "export_id": export_id(request)},

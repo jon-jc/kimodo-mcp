@@ -27,6 +27,7 @@ class PoseReference(StrictModel):
 
     job_id: Annotated[str, Field(pattern=r"^[0-9a-f]{32}$", min_length=32, max_length=32, strict=True)]
     sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0
+    variant_id: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", strict=True)] | None = None
     frame: Annotated[StrictInt, Field(ge=0, le=2399)]
 
 

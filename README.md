@@ -27,8 +27,9 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Candidate comparison | Align compatible clips by frame offset and compare world positions or poses relative to the root. |
 | Editor integration | Execute fixed Blender and Unreal handoffs, then check exported files, rig compatibility, and animation timing. |
 | Downloads | Retrieve original motion, animated GLB, skeletal mesh/animation FBX, and Blender projects when available. |
+| Precise rig corrections | Inspect all source joints, groups and local axes; save bounded local rotation corrections with smooth frame-window blends, trimming and planar placement. |
 | Numerical assessment | Apply explicit project limits to up to eight takes; inspect problem windows and unavailable evidence without an automatic quality ranking. |
-| MCP interface | Use 39 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| MCP interface | Use 42 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
 
@@ -202,7 +203,7 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **39 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **42 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
@@ -229,6 +230,9 @@ The server exposes **39 tools**. Start with `get_capabilities` for the running s
 | `inspect_motion` | Inspect arrays, hierarchy, timing, bounds, and contact metadata. |
 | `inspect_motion_frames` | Read selected frame positions and optional rotations without inventing missing metadata. |
 | `preview_motion` | Create a local interactive skeleton preview from completed NPZ. |
+| `inspect_motion_rig` | Read every joint, parent, body group, bone length, local axis and edit eligibility. |
+| `create_motion_variant` | Save precise source-relative SOMA corrections without inference or overwriting the original. |
+| `get_motion_variant` | Verify a correction receipt, timing, edit settings and output checksum. |
 | `assess_motion_quality` | Check explicit physical limits and return source-bound problem-frame windows. |
 | `assess_motion_candidates` | Assess up to eight takes under the same reproducible policy, preserving input order. |
 | `analyze_motion_quality` | Speed, acceleration, jerk, angular speed, bone drift, contact sliding, floor proxies, and seams. |
@@ -256,8 +260,8 @@ Frame inspection accepts 1–16 increasing source frames. An explicit joint sele
 | `kimodo://workspace` | Current shared workspace state. |
 | `kimodo://models` | Supported model identifiers and export formats. |
 | `kimodo://request-schema` | Advanced generation request schema, retained for compatibility. |
-| `kimodo://schemas/{schema_name}` | One of seven named domain input schemas. |
-| `kimodo://workflows/{workflow}` | One of eleven ordered workflow recipes. |
+| `kimodo://schemas/{schema_name}` | One of eight named domain input schemas. |
+| `kimodo://workflows/{workflow}` | One of twelve ordered workflow recipes. |
 | `kimodo://jobs/{job_id}` | Durable job status, saved request, and completed manifest. |
 | `kimodo://jobs/{job_id}/outputs` | Verified output metadata for the selected job. |
 
@@ -352,6 +356,14 @@ The receipt records source and output hashes, timing, options, and coordinate co
 For an NPZ-only SOMA job, pass the returned `export_id` to `prepare_blender_handoff` to use that exact derived BVH, then execute and read the skeleton handoff with the same sample and attempt. No new inference is needed. The [export workflow guide](docs/agent-workflows.md#export-existing-motion-without-inference) covers receipt reuse, representation limits, and downstream selection.
 
 Read the [detailed change log](CHANGELOG.md) for numerical assessment and generation-planning improvements.
+
+## Correct an existing animation through MCP
+
+Use `inspect_motion_rig` to identify the actual source joints and their local axes, then `inspect_motion_frames` to examine the problem in context. `create_motion_variant` accepts explicit local rotation offsets, a source-frame window and smooth blending at its edges. It creates a separate corrected version without rerunning the model. Trimming and planar placement are also supported. The original stays available.
+
+Call `get_workflow("correct-motion")` and `get_input_schema("variant_edit")` for the full agent interface. Keep the returned `variant_id` on subsequent inspection, assessment, comparison, pose reuse, exports, character previews and Blender/Unreal calls. `get_job` lists verified saved versions. The [correction guide](docs/rig-corrections.md) explains controls, examples, frame alignment and validation.
+
+These are controlled motion corrections on canonical SOMA30/SOMA77 sources. They do not change rest-bone lengths, hierarchy or skin weights, solve contacts automatically, or establish production quality. Effective joint corrections discard stale predicted contact labels; review foot contact visually. The supplied character has 24 fitted bones, so use the source rig to inspect finger edits that it cannot reproduce.
 
 ## Blender and Unreal workflows
 

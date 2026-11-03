@@ -28,6 +28,7 @@ Call `get_workflow` with one of these identifiers:
 | `revise` | Change selected fields while preserving the original request and outputs. |
 | `reuse-pose` | Inspect a source pose and anchor a new animation to it. |
 | `inspect` | Read timing, selected frames, physical diagnostics, and a visual review. |
+| `correct-motion` | Inspect the source rig, save precise corrections, re-assess and review the exact version. |
 | `assess-candidates` | Check up to eight completed takes against an explicit policy and inspect problem windows. |
 | `compare` | Compare compatible samples with explicit frame alignment. |
 | `export-motion` | Convert completed managed motion to a compatible interchange format without inference. |
@@ -60,6 +61,7 @@ Keep the actual job, sample, `source_kind`, and attempt consistent across prepar
 | `animation_brief` | Natural description, duration or beats, effort, candidates, seed, and model. |
 | `animation_revision` | Explicit changes to an existing request. |
 | `pose_reference` | A source job, sample index, and zero-based frame. |
+| `variant_edit` | Original-frame trimming, planar placement and bounded local XYZ joint corrections with edge blending. |
 | `quality_policy` | Required numerical checks, caller-authored limits, contact/floor assumptions and explicit loop intent. |
 | `quality_thresholds` | Diagnostic sensitivities in physical units. |
 | `unreal_target` | Exact project, Skeleton, SkeletalMesh, destination directory, and asset name. |
@@ -117,6 +119,10 @@ Use `inspect_motion`, `analyze_motion_quality`, and `create_motion_review` to in
 `compare_motions` compares two completed samples with matching FPS and skeleton structure. The jobs may be identical when comparing two candidates from one run. A positive offset compares first-clip frame `i` with second-clip frame `i + offset_frames`. Start in `world` space to see translation; `root_relative` removes each frame's root translation while retaining heading and scale. The comparison does not retarget, resample, repair, or blend.
 
 Choose a candidate based on observed motion, intended action, and downstream deformation. Keep the original request, model, seed, output hashes, and the reason for the selection. [Review methodology](animate-review.md) explains the diagnostics and their limits.
+
+## Correct existing motion without regeneration
+
+The [rig correction guide](rig-corrections.md) covers the complete MCP workflow. `inspect_motion_rig` supplies named body groups, hierarchy, frame-specific local axes and explicit edit eligibility. `create_motion_variant` saves an immutable original-relative edit; `get_motion_variant` verifies its receipt. `get_job` includes verified variants and separate native/variant previews. Every source-consuming operation accepts an optional `variant_id`, including `PoseReference` and candidate assessment references; comparison has `other_variant_id` for its second source. Omit the selector to return to the original.
 
 ## Apply explicit numerical policies
 

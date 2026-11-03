@@ -97,6 +97,9 @@ def _convert(request: ExportRequest) -> dict:
     validate_artifact(path, request, motion["positions"].shape[1], motion["fps"])
     if digest(source) != request.source_sha256:
         raise ValueError("Source changed during export; no completed receipt will be published.")
+    if request.variant_id is not None:
+        # A derived source also depends on its unchanged original and edit receipt.
+        load_source(request)
     report = make_report(request, motion, path)
     atomic_json(directory / "export-report.json", report)
     return report
