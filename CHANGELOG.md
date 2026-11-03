@@ -2,6 +2,24 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-03 — Interactive rig inspection and correction studio
+
+### Added
+
+- A source-skeleton viewer with exact frame playback, clickable joints, searchable names, anatomical groups, selected-chain highlighting/isolation, labels, fixed camera views and keyboard navigation. Search preserves full skeleton context unless isolation is explicitly selected.
+- Desktop focus mode places the viewport beside correction controls; narrow layouts stack accessibly. Original and fitted-character views remain distinct and use independently verified source identities.
+- Local degree controls, original-frame windows, smooth edge blending, trimming and planar placement feed the existing typed MCP correction operation. Draft undo/redo/reset and per-joint removal prepare a complete original-relative edit before saving a new version.
+- Version selection and exact original-frame ghosts support before/after review, including translated and trimmed clips. Switching versions retains the selected joint and original frame where available. Camera bounds include both compared sources.
+- Selected-version diagnostics, pose anchoring, comparisons, conversion, downloads, character previews and Blender/Unreal controls. File labels distinguish mesh/animation roles and conversion options; edited preview readiness and trimmed timing are explicit.
+- Detailed usage, keyboard shortcuts, MCP parity and real desktop/comparison/narrow-screen screenshots in the README and studio guide. Generation plans now display their transition and constraint-density advisories.
+
+### Validation and scope
+
+- 22 frontend tests pass, covering source/version rejection, hierarchy and frame validation, trimmed ghost alignment, search versus isolation, degree conversion, edit bounds, draft history, backend edit eligibility and exact preview/download selection. Production build succeeds with bundled dependencies.
+- The actual studio saved a new five-degree forearm correction after stage/undo/redo. Its immutable receipt and output were independently verified through a fresh MCP stdio session exposing all 42 tools; repeating the same edit reused the same verified version.
+- Browser checks covered desktop focus mode, source/character selection, exact frame scrubbing, retained joint/frame selection across trims, chain isolation, original ghosts, contact-unavailable diagnostics and a narrow 390-pixel viewport without horizontal document overflow. The final checked page reported no browser errors.
+- Saving a draft performs real backend forward kinematics; the viewer never fabricates an unsaved pose. Existing sources remain unchanged. Natural appearance, contacts and fitted-character deformation still require visual review; no automatic production approval is claimed.
+
 ## 2026-11-03 — Immutable rig corrections with full MCP version selection
 
 ### Added

@@ -77,6 +77,50 @@ Browser code and Three.js are bundled locally with complete renderer and build-r
 
 The frontend source lives under `web/src`, with locked dependencies and focused tests. `npm run dev` starts Vite on loopback; its development API proxy targets port 8768. Production validation should use the actual studio server because it also applies the browser resource and request policies.
 
+## Inspect and correct the source rig
+
+![Focused desktop source-rig editor showing an actual saved five-degree forearm correction](images/studio-rig-inspector.jpg)
+
+Choose a completed animation from history and a candidate. **Source rig** displays its actual per-frame joint positions. **Fitted character** displays a separately verified GLB. The selected **Motion version** applies to diagnostics, reviews, pose anchoring, exports and editor operations. A new correction has no fitted preview until you build one; the interface never substitutes the original character preview for it.
+
+### See the part you need
+
+- Click a joint, or type part of its name in **Find a joint**. Search narrows the list without hiding surrounding bones. The selected joint and connected chain are highlighted.
+- **Body region** shows an anatomical group. **Isolate selected chain** limits the viewport to the selected joint, its ancestors and descendants. Turn it off to regain full context.
+- **Joint labels** names visible joints; the selected name remains visible independently. **Camera** offers perspective, front, side and top views. **Fit view** frames the motion; drag to orbit, scroll to zoom and right-drag to pan.
+- **Focus rig editor**, on desktop widths above 1000 pixels, keeps the viewport beside the adjustment panel and temporarily hides creation/history. **Show full studio** restores them. Narrow screens stack the controls vertically.
+- With the source canvas focused, left/right arrows step one source sample, up/down select visible joints, Home/End seek the endpoints, Space toggles playback, F fits the view and Escape clears the joint selection. The joint list supports arrow keys and Home/End navigation.
+
+### Make a small correction
+
+1. Pause near the problem and select a nonroot joint. Read its position and inspect the parent/child chain.
+2. Enter local X/Y/Z offsets in **degrees**. The backend receives radians in the documented X → Y → Z multiplication order. These offsets affect descendants while preserving bone lengths.
+3. Set **Original start frame**, **End frame (exclusive)** and **Blend frames per edge**. The default three-frame smoothstep taper eases the correction into and out of its window. Use a small adjustment and leave room around the problem.
+4. Choose **Stage joint correction**. Up to 16 distinct joints can be staged; staging the same joint replaces its draft settings. Remove an adjustment or use **Undo draft**, **Redo draft** and **Reset draft** as needed.
+5. Optionally expand **Trim & place the clip**. Keep an original-frame interval, change world yaw, translate X/Z, or place the retained first root at a new planar origin. Stage these settings separately; existing adjustment windows must remain inside the trim.
+6. Choose **Save & inspect new version**. The server verifies the original, computes the corrected motion and saves a separate version. The viewer switches only after successful verification. The selected joint and original-source frame remain in context where possible.
+7. Inspect the result, neighboring frames and diagnostics. Build its fitted-character preview to inspect skin deformation, then use the selected version's editor export controls.
+
+Draft controls do not pretend to update the visible motion before backend forward kinematics runs. The status explicitly distinguishes an unsaved draft from a selected saved version. Undo/redo affect the draft; **Motion version → Original motion** restores original viewing. Saved versions and source files are preserved.
+
+### Before and after
+
+![Isolated forearm chain showing a placed and trimmed version beside the original ghost at the same original frame](images/studio-rig-comparison.jpg)
+
+**Original ghost** overlays the original at the exact matching source frame. A trim beginning at original frame 15 maps its local frame 0 to original frame 15. The image above shows original frame 60 in a 90-frame placed/trimmed correction; the camera includes both world positions. Changing versions preserves the original-frame position where it exists in the destination range. The ghost uses actual world positions, so translation/yaw differences stay visible.
+
+The source rig may have 77 joints while the supplied fitted character has only 24 bones. Inspect finger changes on the source rig; that character cannot reproduce independent finger, facial, hair or cloth motion. Effective joint corrections invalidate predicted contact labels. An unavailable contact diagnostic is expected and is not evidence that feet are planted. These controls do not alter rest-bone lengths, hierarchy or skin weights and do not automatically solve anatomy or contacts.
+
+### Downloads and MCP parity
+
+The download list stays tied to the exact candidate/version and keeps verified conversion results after refresh. Labels distinguish character mesh FBX, character/skeleton animation FBX, Blender projects, edited NPZ, and BVH rest-pose options. Build a new preview when the selected version has no verified character export. Trimming updates displayed timing and handoff validation.
+
+All correction operations are also available to assistants: `inspect_motion_rig`, `create_motion_variant`, `get_motion_variant`, the `variant_edit` schema and `correct-motion` recipe. The same `variant_id` selects source data through inspection, assessment, comparison, pose reuse, conversion and editor handoffs. Browser camera and layout controls remain presentation settings. See [exact MCP examples](rig-corrections.md).
+
+![Narrow-screen joint browser and correction controls](images/studio-rig-narrow.jpg)
+
+The interface was checked at a 390-pixel viewport without horizontal document overflow. This remains a local desktop workflow; responsive layout does not expose the server to a phone or external network.
+
 ## Describe and plan
 
 Use the creation panel to describe a complete physical action. Include pace, direction, and relevant starting conditions:
