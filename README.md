@@ -27,7 +27,8 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Candidate comparison | Align compatible clips by frame offset and compare world positions or poses relative to the root. |
 | Editor integration | Execute fixed Blender and Unreal handoffs, then check exported files, rig compatibility, and animation timing. |
 | Downloads | Retrieve original motion, animated GLB, skeletal mesh/animation FBX, and Blender projects when available. |
-| MCP interface | Use 37 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| Numerical assessment | Apply explicit project limits to up to eight takes; inspect problem windows and unavailable evidence without an automatic quality ranking. |
+| MCP interface | Use 39 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
 
@@ -201,7 +202,7 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **37 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **39 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
@@ -228,6 +229,8 @@ The server exposes **37 tools**. Start with `get_capabilities` for the running s
 | `inspect_motion` | Inspect arrays, hierarchy, timing, bounds, and contact metadata. |
 | `inspect_motion_frames` | Read selected frame positions and optional rotations without inventing missing metadata. |
 | `preview_motion` | Create a local interactive skeleton preview from completed NPZ. |
+| `assess_motion_quality` | Check explicit physical limits and return source-bound problem-frame windows. |
+| `assess_motion_candidates` | Assess up to eight takes under the same reproducible policy, preserving input order. |
 | `analyze_motion_quality` | Speed, acceleration, jerk, angular speed, bone drift, contact sliding, floor proxies, and seams. |
 | `create_motion_review` | Offline three-view player, contact sheet, and numerical report. |
 | `compare_motions` | Numerical and visual comparison at an explicit offset with matching rig/FPS. |
@@ -253,8 +256,8 @@ Frame inspection accepts 1–16 increasing source frames. An explicit joint sele
 | `kimodo://workspace` | Current shared workspace state. |
 | `kimodo://models` | Supported model identifiers and export formats. |
 | `kimodo://request-schema` | Advanced generation request schema, retained for compatibility. |
-| `kimodo://schemas/{schema_name}` | One of six named domain input schemas. |
-| `kimodo://workflows/{workflow}` | One of ten ordered workflow recipes. |
+| `kimodo://schemas/{schema_name}` | One of seven named domain input schemas. |
+| `kimodo://workflows/{workflow}` | One of eleven ordered workflow recipes. |
 | `kimodo://jobs/{job_id}` | Durable job status, saved request, and completed manifest. |
 | `kimodo://jobs/{job_id}/outputs` | Verified output metadata for the selected job. |
 
@@ -347,6 +350,8 @@ The format defaults to `bvh`; choose the correct format for the source. Options 
 The receipt records source and output hashes, timing, options, and coordinate conventions. Identical requests reuse a verified export; changed options create a separate derived file. Original motion and generation manifests remain unchanged. `list_job_outputs` discovers verified derived exports. An incomplete attempt is retained for inspection and is not automatically rerun.
 
 For an NPZ-only SOMA job, pass the returned `export_id` to `prepare_blender_handoff` to use that exact derived BVH, then execute and read the skeleton handoff with the same sample and attempt. No new inference is needed. The [export workflow guide](docs/agent-workflows.md#export-existing-motion-without-inference) covers receipt reuse, representation limits, and downstream selection.
+
+Read the [detailed change log](CHANGELOG.md) for numerical assessment and generation-planning improvements.
 
 ## Blender and Unreal workflows
 

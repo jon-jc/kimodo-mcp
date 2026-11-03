@@ -66,6 +66,9 @@ def test_explicit_beats_keep_text_timing_and_context_separate():
     assert result["request"]["segments"] == beats
     assert result["brief"]["description"] == "Greeting scene"
     assert result["plan"]["total_frames"] == 390
+    assert result["plan"]["segment_timeline"][1]["incoming_transition_start_frame"] == 235
+    assert result["plan"]["segment_timeline"][1]["action_start_frame"] == 240
+    assert result["plan"]["advisories"][0]["code"] == "transition_context"
 
 
 @pytest.mark.parametrize(
@@ -134,6 +137,16 @@ def test_multibeat_revision_requires_beats_but_seed_only_is_safe():
     with pytest.raises(ValueError, match="multi-beat"):
         plan_revision(source, AnimationRevision(description="Walk slowly"))
     assert plan_revision(source, AnimationRevision(seed=3))["request"]["segments"] == source["segments"]
+
+
+def test_revision_recomputes_planning_advice_for_replacement_beats():
+    result = plan_revision(original(), AnimationRevision(
+        beats=[{"text": "Walk", "duration": 2}, {"text": "Wave", "duration": 1}],
+        clear_constraints=True,
+    ))
+    assert result["plan"]["segment_timeline"][1]["action_end_frame_exclusive"] == 90
+    assert result["plan"]["constraint_density"] == []
+    assert [item["code"] for item in result["plan"]["advisories"]] == ["transition_context"]
 
 
 @pytest.mark.parametrize(

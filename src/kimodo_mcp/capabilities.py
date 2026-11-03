@@ -9,6 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Literal, get_args
 
+from .assessment import QualityPolicy
 from .catalog import UPSTREAM_REVISION, list_models
 from .handoff import UnrealTarget
 from .planning import QUALITY_STEPS, AnimationBrief, AnimationRevision, PoseReference
@@ -16,11 +17,11 @@ from .schemas import GenerateRequest, QualityThresholds
 
 WorkflowName = Literal[
     "generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-    "export-character", "import-unreal", "recover-job",
+    "export-character", "import-unreal", "recover-job", "assess-candidates",
 ]
 SchemaName = Literal[
     "generate_request", "animation_brief", "animation_revision", "pose_reference",
-    "quality_thresholds", "unreal_target",
+    "quality_thresholds", "unreal_target", "quality_policy",
 ]
 WORKFLOW_IDS = get_args(WorkflowName)
 SCHEMA_IDS = get_args(SchemaName)
@@ -31,6 +32,7 @@ _SCHEMAS = {
     "animation_revision": AnimationRevision,
     "pose_reference": PoseReference,
     "quality_thresholds": QualityThresholds,
+    "quality_policy": QualityPolicy,
     "unreal_target": UnrealTarget,
 }
 
@@ -48,7 +50,8 @@ _GROUPS = {
     "inspection": (
         "Inspect, constrain and compare actual motion",
         ("inspect_motion", "inspect_motion_frames", "extract_pose_constraint", "extract_motion_constraints",
-         "preview_motion", "analyze_motion_quality", "create_motion_review", "compare_motions"),
+         "preview_motion", "analyze_motion_quality", "create_motion_review", "compare_motions",
+         "assess_motion_quality", "assess_motion_candidates"),
     ),
     "outputs": ("Export and locate verified outputs", ("get_artifact", "list_job_outputs", "export_motion")),
     "blender": (
@@ -92,6 +95,25 @@ def _handoff_args(source_kind: str) -> tuple[dict, dict]:
 
 
 _RECIPES = {
+    "assess-candidates": {
+        "title": "Assess takes against an action-specific numerical policy",
+        "inputs": {"candidates": "One to eight distinct completed job/sample references.",
+                   "policy": "Explicit checks and limits in physical units, with floor/contact context and loop intent."},
+        "requirements": ["Every selected source is completed and checksum-verified.",
+                         "Choose thresholds for the intended action; numerical limits do not measure artistic quality."],
+        "steps": [
+            _step("contract", "get_input_schema", "Read the complete policy schema and supported metric identifiers.",
+                  arguments={"schema_name": "quality_policy"}),
+            _step("assessment", "assess_motion_candidates", "Each take reports pass/fail/unavailable plus bounded problem windows.",
+                  arguments_from={"candidates": "input.candidates", "policy": "input.policy"}),
+        ],
+        "completion": "Inspect flagged frames and rendered character motion before selecting or revising a take.",
+        "notes": ["Results retain input order; no automatic winner or realism score is produced.",
+                  "Missing contact labels or eligible intervals remain unavailable rather than passing.",
+                  "Frame windows include all source frames contributing to a derivative; review near each peak.",
+                  "A technical pass still requires prompt-adherence, body-language, deformation and target-editor review.",
+                  "The generation batch seed and sample index jointly identify the take; sample index is not added to the seed."],
+    },
     "generate": {
         "title": "Describe, plan, generate and review",
         "inputs": {"brief": "animation_brief", "start_from": "Optional pose_reference; default null."},
