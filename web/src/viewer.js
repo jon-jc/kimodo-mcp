@@ -38,18 +38,21 @@ export class MotionViewer {
     let previous = performance.now();
     this.renderer.setAnimationLoop(now => {
       const delta = Math.min(Math.max((now - previous) / 1000, 0), 0.1); previous = now;
+      if (this.container.hidden || !this.container.clientWidth || !this.container.clientHeight) return;
       if (this.mixer && this.playing) {
         this.time += delta * this.speed;
         if (this.time >= this.duration) { this.time = this.duration; this.playing = false; }
         this.mixer.setTime(this.time); this.callbacks.onTime(this.time, this.duration, this.playing);
       }
       this.controls.update();
+      this.onFrame?.(delta);
       this.renderer.render(this.scene, this.camera);
     });
   }
 
   resize() {
     const width = this.container.clientWidth, height = this.container.clientHeight;
+    if (width < 1 || height < 1) return;
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / Math.max(height, 1); this.camera.updateProjectionMatrix();
   }

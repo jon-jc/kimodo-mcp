@@ -1,9 +1,12 @@
 import './styles.css';
+import './rig.css';
 import { action, anchorFrame, buildBrief, description, duration, jobId, request, revisionChanges, safeLocalUrl, sampleCount, sampleName, setToken } from './api.js';
 import { MotionViewer } from './viewer.js';
+import { RigPanel } from './rig-panel.js';
+import { selectedDownloads, selectedPreview as previewFor, sourceKey, variantArgs } from './rig-data.js';
 
 const $ = id => document.getElementById(id);
-const state = { jobs: [], selected: null, sample: 0, revision: null, revisionBase: null, connected: false, polling: false, previewUrl: null, previewLoaded: false, loadedInitial: false, jobSignature: '', comparisonSignature: '', selectionSignature: '', previews: new Map(), inspecting: 0, busy: new Set() };
+const state = { jobs: [], selected: null, sample: 0, variant: null, viewerMode: 'character', characterInfo: null, revision: null, revisionBase: null, connected: false, polling: false, previewUrl: null, previewLoaded: false, loadedInitial: false, jobSignature: '', comparisonSignature: '', selectionSignature: '', previews: new Map(), verifiedOutputs: new Map(), inspecting: 0, busy: new Set() };
 const presets = {
   wave: 'A person stands in place and slowly waves with their right hand.',
   walk: 'A person walks forward at a relaxed, steady pace with natural arm swings.',
@@ -11,8 +14,11 @@ const presets = {
 };
 const el = (tag, className, text) => { const node = document.createElement(tag); if (className) node.className = className; if (text !== undefined) node.textContent = text; return node; };
 const current = () => state.jobs.find(job => jobId(job) === state.selected);
-const currentKey = () => `${state.selected}:${state.sample}`;
+const currentKey = () => sourceKey(state.selected, state.sample, state.variant);
 const completed = () => current()?.status === 'completed';
+const selectedVariant = () => current()?.variants?.find(item => item.variant_id === state.variant && item.sample_index === state.sample);
+const selectedTiming = () => selectedVariant() ?? (rigPanel?.loadedKey === currentKey() ? rigPanel.data : null) ?? current()?.manifest ?? {};
+const activeViewer = () => state.viewerMode === 'source' ? rigPanel?.viewer : viewer;
 
 function notice(message, error = false) {
   $('notice-text').textContent = message; $('notice').classList.toggle('error', error); $('notice').hidden = false;
@@ -24,33 +30,76 @@ function viewerMessage(title, detail) {
   $('viewer-message').querySelector('strong').textContent = title;
   $('viewer-message').querySelector('p').textContent = detail;
 }
-let viewer;
+let viewer, rigPanel;
+function showTime(kind, time, total, playing) {
+  if (state.viewerMode !== kind) return;
+  $('time-label').textContent = `${time.toFixed(2)} / ${total.toFixed(2)} s`;
+  $('scrubber').max = String(total || 1); $('scrubber').value = String(time); $('play').textContent = playing ? 'Ⅱ' : '▶';
+  $('play').setAttribute('aria-label', playing ? 'Pause animation' : 'Play animation');
+  $('play').disabled = !total; $('scrubber').disabled = !total;
+  if (kind === 'source') rigPanel?.updatePosition();
+  const timing = selectedTiming();
+  if ($('start-pose').checked && timing.frames) $('anchor-note').textContent = `Starting from candidate ${state.sample + 1}${state.variant ? ', selected version' : ''}, frame ${anchorFrame(time, timing.frames, timing.fps)}. Seamless blending is not guaranteed.`;
+}
 try {
   viewer = new MotionViewer($('viewport'), {
     onProgress: text => viewerMessage('Loading 3D preview', text),
     onLoaded: info => {
-      state.previewLoaded = true;
+      state.previewLoaded = true; state.characterInfo = info;
       $('viewer-message').hidden = true;
-      $('asset-label').textContent = `${info.bones} bones · ${info.animations ? 'animated' : 'static'} GLB`;
-      $('play').disabled = !info.duration; $('scrubber').disabled = !info.duration;
-      $('scrubber').max = String(info.duration || 1);
+      if (state.viewerMode === 'character') { $('asset-label').textContent = `${info.bones} fitted bones · ${info.animations ? 'animated' : 'static'} GLB`; showTime('character', 0, info.duration, false); }
       enableActions();
     },
-    onError: error => { state.previewLoaded = false; viewerMessage('Preview could not load', error.message); $('play').disabled = true; $('scrubber').disabled = true; enableActions(); },
-    onTime: (time, total, playing) => {
-      $('time-label').textContent = `${time.toFixed(2)} / ${total.toFixed(2)} s`;
-      $('scrubber').value = String(time); $('play').textContent = playing ? 'Ⅱ' : '▶';
-      $('play').setAttribute('aria-label', playing ? 'Pause animation' : 'Play animation');
-      if (!total) { $('play').disabled = true; $('scrubber').disabled = true; }
-      if ($('start-pose').checked && current()?.manifest) $('anchor-note').textContent = `Starting from candidate ${state.sample + 1}, frame ${anchorFrame(time, current().manifest.frames, current().manifest.fps)}. Seamless blending is not guaranteed.`;
-    },
+    onError: error => { state.previewLoaded = false; viewerMessage('Preview could not load', error.message); if (state.viewerMode === 'character') showTime('character', 0, 0, false); enableActions(); },
+    onTime: (time, total, playing) => showTime('character', time, total, playing),
   });
 } catch (error) { viewerMessage('3D graphics are unavailable', 'Enable browser hardware acceleration to use the model viewer. Generation and reviews remain available.'); }
 
-$('play').addEventListener('click', () => viewer?.togglePlay());
-$('scrubber').addEventListener('input', event => viewer?.seek(event.target.value));
-$('speed').addEventListener('change', event => { if (viewer) viewer.speed = Number(event.target.value); });
-$('reset-camera').addEventListener('click', () => viewer?.fit());
+try {
+  rigPanel = new RigPanel({
+    onTime: (time, total, playing) => showTime('source', time, total, playing),
+    onLoaded: info => { if (state.viewerMode === 'source') $('asset-label').textContent = `${info.bones} source joints · exact frames`; enableActions(); },
+    onError: error => { notice(error.message, true); enableActions(); },
+    onVariant: async (result, snapshot) => {
+      const job = state.jobs.find(item => jobId(item) === jobId(snapshot.job));
+      if (job) { job.variants ??= []; if (!job.variants.some(item => item.variant_id === result.variant_id)) job.variants.push(result); }
+      if (currentKey() === snapshot.key) { state.variant = result.variant_id; state.selectionSignature = ''; $('start-pose').checked = false; setViewerMode('source'); await renderSelection(); }
+      notice('New motion version saved. Inspect its joints and contact diagnostics before building a fitted-character preview.');
+      await refresh();
+    },
+  });
+} catch (error) { $('rig-status').textContent = `Source viewer unavailable: ${error.message}`; }
+
+function setViewerMode(mode) {
+  if (activeViewer()) activeViewer().playing = false;
+  state.viewerMode = mode;
+  $('viewport').hidden = mode !== 'character'; $('rig-viewport').hidden = mode !== 'source'; $('rig-workspace').hidden = mode !== 'source';
+  $('mode-character').setAttribute('aria-pressed', String(mode === 'character')); $('mode-source').setAttribute('aria-pressed', String(mode === 'source'));
+  $('rig-focus').hidden = mode !== 'source';
+  if (mode !== 'source') setRigFocus(false);
+  else $('rig-focus').disabled = window.innerWidth <= 1000;
+  $('wireframe').disabled = mode !== 'character'; $('skeleton').disabled = mode !== 'character';
+  const active = activeViewer(); active?.resize(); active?.fit();
+  $('asset-label').textContent = mode === 'source' ? (rigPanel?.data ? `${rigPanel.data.joint_names.length} source joints · exact frames` : 'Source rig') : (state.previewLoaded ? `${state.characterInfo?.bones ?? '—'} fitted bones · GLB` : 'Fitted character');
+  showTime(mode, active?.time ?? 0, active?.duration ?? 0, false); enableActions();
+}
+function setRigFocus(enabled) {
+  state.focusRig = Boolean(enabled && state.viewerMode === 'source' && window.innerWidth > 1000);
+  document.querySelector('.workspace').classList.toggle('rig-focus', state.focusRig);
+  $('rig-focus').setAttribute('aria-pressed', String(state.focusRig));
+  $('rig-focus').textContent = state.focusRig ? 'Show full studio' : 'Focus rig editor';
+  $('rig-focus').disabled = window.innerWidth <= 1000;
+  requestAnimationFrame(() => { activeViewer()?.resize(); activeViewer()?.fit(); });
+}
+$('rig-focus').addEventListener('click', () => setRigFocus(!state.focusRig));
+window.addEventListener('resize', () => { if (state.focusRig && window.innerWidth <= 1000) setRigFocus(false); $('rig-focus').disabled = window.innerWidth <= 1000; });
+$('mode-source').addEventListener('click', () => setViewerMode('source'));
+$('mode-character').addEventListener('click', () => setViewerMode('character'));
+$('motion-version').addEventListener('change', () => { state.variant = $('motion-version').value || null; state.selectionSignature = ''; $('start-pose').checked = false; renderSelection(); });
+$('play').addEventListener('click', () => activeViewer()?.togglePlay());
+$('scrubber').addEventListener('input', event => activeViewer()?.seek(event.target.value));
+$('speed').addEventListener('change', event => { for (const item of [viewer, rigPanel?.viewer]) if (item) item.speed = Number(event.target.value); });
+$('reset-camera').addEventListener('click', () => activeViewer()?.fit());
 for (const [id, method] of [['wireframe', 'setWireframe'], ['skeleton', 'setSkeleton']]) {
   $(id).addEventListener('click', () => { const enabled = $(id).getAttribute('aria-pressed') !== 'true'; $(id).setAttribute('aria-pressed', String(enabled)); viewer?.[method](enabled); });
 }
@@ -64,9 +113,10 @@ function brief() {
 function startFrom() {
   if (!$('start-pose').checked || $('start-pose').disabled || state.revision) return {};
   const job = current();
-  return { start_from: { job_id: jobId(job), sample_index: state.sample, frame: anchorFrame(viewer.time, job.manifest.frames, job.manifest.fps) } };
+  const timing = selectedTiming();
+  return { start_from: { job_id: jobId(job), sample_index: state.sample, ...variantArgs(state.variant), frame: anchorFrame(activeViewer().time, timing.frames, timing.fps) } };
 }
-$('start-pose').addEventListener('change', () => { if ($('start-pose').checked) viewer?.seek(viewer.time); $('plan-summary').hidden = true; });
+$('start-pose').addEventListener('change', () => { if ($('start-pose').checked) activeViewer()?.seek(activeViewer().time); $('plan-summary').hidden = true; });
 function countCharacters() { $('character-count').textContent = `${$('description').value.length} / 2000`; $('plan-summary').hidden = true; }
 $('description').addEventListener('input', countCharacters);
 function updateSequence() {
@@ -115,6 +165,7 @@ $('plan').addEventListener('click', () => withBusy($('plan'), async () => {
   box.append(el('strong', '', `${plan.duration_seconds ?? brief().duration_seconds}s · ${plan.total_frames ?? Math.floor(brief().duration_seconds * 30)} frames · ${generated.samples ?? brief().candidates} candidate(s)`));
   box.append(el('p', '', `Seed ${generated.seed ?? 'assigned at submission'} · ${generated.steps ?? 'planned'} generation steps`));
   for (const note of (result.notes ?? []).slice(0, 4)) box.append(el('p', '', typeof note === 'string' ? note : note.message ?? 'Review the planned request.'));
+  for (const advisory of (plan.advisories ?? [])) { const item = el('p', 'plan-advisory', advisory.message ?? 'Review the planned transition.'); if (advisory.action) item.append(el('span', '', ` ${advisory.action}`)); box.append(item); }
   box.hidden = false;
 }));
 
@@ -128,17 +179,18 @@ $('create-form').addEventListener('submit', event => {
       ? await action('revise_animation', { job_id: state.revision, revision: changes, submit: true })
       : await action('generate_animation', { brief: input, ...startFrom() });
     const submitted = result.job ?? result;
-    state.selected = jobId(submitted) ?? state.selected; state.sample = 0; state.selectionSignature = '';
+    state.selected = jobId(submitted) ?? state.selected; state.sample = 0; state.variant = null; state.selectionSignature = '';
     notice('Animation queued. Its progress will appear in your animation history.');
     await refresh();
   });
 });
 
 function enableActions() {
-  for (const id of ['review', 'compare', 'build-preview', 'send-blender', 'send-unreal']) $(id).disabled = !completed() || !state.connected || state.busy.has(id);
+  for (const id of ['review', 'compare', 'build-preview', 'send-blender', 'send-unreal', 'export-motion']) $(id).disabled = !completed() || !state.connected || state.busy.has(id);
   for (const id of ['generate', 'plan']) $(id).disabled = !state.connected || state.busy.has(id);
-  const job = current(), preview = selectedPreview(job, state.sample);
-  const canAnchor = completed() && !state.revision && state.previewLoaded && ['somaskel30', 'somaskel77'].includes(job?.manifest?.skeleton) && safeLocalUrl(preview?.url) === state.previewUrl;
+  const job = current(), preview = selectedPreview(job, state.sample, state.variant);
+  const matchingView = state.viewerMode === 'source' ? rigPanel?.loadedKey === currentKey() : state.previewLoaded && safeLocalUrl(preview?.url) === state.previewUrl;
+  const canAnchor = completed() && !state.revision && matchingView && ['somaskel30', 'somaskel77'].includes(job?.manifest?.skeleton);
   $('start-pose').disabled = !canAnchor;
   if (!canAnchor) $('start-pose').checked = false;
 }
@@ -210,18 +262,16 @@ function renderJobs() {
   }
 }
 
-function selectedPreview(job, sample) {
-  const saved = Array.isArray(job?.previews) ? job.previews.filter(item => item.sample_index === sample).sort((a, b) => (b.attempt ?? 0) - (a.attempt ?? 0))[0] : null;
-  const cached = state.previews.get(`${jobId(job)}:${sample}`);
-  if (!cached || (saved?.attempt ?? -1) > (cached.attempt ?? -1)) return saved;
-  return { ...cached, exports: cached.exports?.length ? cached.exports : (saved?.attempt === cached.attempt ? saved.exports : []) };
+function selectedPreview(job, sample, variant = null) {
+  const cached = state.previews.get(sourceKey(jobId(job), sample, variant));
+  return previewFor(job, sample, variant, cached);
 }
 
 function renderDownloads(job) {
   $('downloads').replaceChildren();
-  const preview = selectedPreview(job, state.sample);
-  const entries = [...(job?.downloads ?? []).filter(item => item.sample_index === state.sample), ...(preview?.exports ?? [])];
-  if (preview?.url && !entries.some(item => item.url === preview.url)) entries.push({ label: 'Character GLB', url: preview.url });
+  const preview = selectedPreview(job, state.sample, state.variant);
+  const source = { ...job, downloads: [...(job?.downloads ?? []), ...(state.verifiedOutputs.get(jobId(job)) ?? [])] };
+  const entries = selectedDownloads(source, state.sample, state.variant, preview);
   const seen = new Set();
   for (const entry of entries) {
     const url = safeLocalUrl(entry.url); if (!url || seen.has(url)) continue; seen.add(url);
@@ -230,13 +280,25 @@ function renderDownloads(job) {
   }
 }
 
+async function refreshVerifiedOutputs(id) {
+  const result = await action('list_job_outputs', { job_id: id });
+  if (result.job_id !== id || !Array.isArray(result.outputs)) throw new Error('The verified output list does not match this animation.');
+  if (state.verifiedOutputs.size >= 64 && !state.verifiedOutputs.has(id)) state.verifiedOutputs.delete(state.verifiedOutputs.keys().next().value);
+  state.verifiedOutputs.set(id, result.outputs);
+  if (state.selected === id) renderDownloads(current());
+}
+
 function renderComparisonOptions() {
-  const signature = JSON.stringify(state.jobs.filter(item => item.status === 'completed').map(item => [jobId(item), sampleCount(item), description(item)]));
+  const signature = JSON.stringify(state.jobs.filter(item => item.status === 'completed').map(item => [jobId(item), sampleCount(item), description(item), item.variants?.map(version => [version.variant_id, version.sample_index])]));
   if (signature === state.comparisonSignature) return; state.comparisonSignature = signature;
   const previous = $('compare-target').value; $('compare-target').replaceChildren(el('option', '', 'Choose a completed candidate')); $('compare-target').firstChild.value = '';
   for (const job of state.jobs.filter(item => item.status === 'completed')) for (let sample = 0; sample < sampleCount(job); sample++) {
     const option = el('option', '', `${description(job).slice(0, 60)} · candidate ${sample + 1} · ${jobId(job).slice(0, 6)}`);
     option.value = `${jobId(job)}:${sample}`; $('compare-target').append(option);
+    for (const version of (job.variants ?? []).filter(item => item.sample_index === sample)) {
+      const variant = el('option', '', `${description(job).slice(0, 40)} · candidate ${sample + 1} · version ${version.variant_id.slice(0, 8)}`);
+      variant.value = `${jobId(job)}:${sample}:${version.variant_id}`; $('compare-target').append(variant);
+    }
   }
   if ([...$('compare-target').options].some(item => item.value === previous)) $('compare-target').value = previous;
 }
@@ -250,7 +312,22 @@ function loadPreview(url) {
 
 async function selectJob(id, sample = 0) {
   if (id !== state.selected || sample !== state.sample) $('start-pose').checked = false;
-  state.selected = id; state.sample = sample; state.selectionSignature = ''; renderJobs(); renderSelection();
+  state.selected = id; state.sample = sample; state.variant = null; state.selectionSignature = ''; setViewerMode('source'); renderJobs(); renderSelection();
+}
+
+function renderVersions(job) {
+  const signature = JSON.stringify([jobId(job), state.sample, state.variant, job.status, job.variants]);
+  if (signature === state.versionSignature) return;
+  state.versionSignature = signature;
+  $('motion-version').replaceChildren(el('option', '', 'Original motion')); $('motion-version').firstChild.value = '';
+  for (const item of (job.variants ?? []).filter(version => version.sample_index === state.sample)) {
+    const option = el('option', '', `Version ${item.variant_id.slice(0, 8)} · ${item.frames} frames · ${item.edit?.joint_adjustments?.length ?? 0} joint edits`);
+    option.value = item.variant_id; $('motion-version').append(option);
+  }
+  if (state.variant && ![...$('motion-version').options].some(option => option.value === state.variant)) {
+    const option = el('option', '', `Selected version ${state.variant.slice(0, 8)} · verifying`); option.value = state.variant; $('motion-version').append(option);
+  }
+  $('motion-version').value = state.variant ?? ''; $('motion-version').disabled = job.status !== 'completed';
 }
 
 function metric(label, value, note) {
@@ -262,35 +339,44 @@ function metric(label, value, note) {
 async function renderSelection() {
   const job = current(); enableActions();
   if (!job) return;
-  renderDownloads(job);
-  const signature = JSON.stringify([jobId(job), job.status, job.manifest, job.previews, state.sample]);
+  renderDownloads(job); renderVersions(job);
+  const signature = JSON.stringify([jobId(job), job.status, job.manifest, job.previews, job.variant_previews, job.variants, state.sample, state.variant]);
   if (signature === state.selectionSignature) return;
   state.selectionSignature = signature;
   const token = ++state.inspecting;
-  $('viewer-title').textContent = job.status === 'completed' ? `Candidate ${state.sample + 1}` : 'Animation in progress';
+  $('viewer-title').textContent = job.status === 'completed' ? `Candidate ${state.sample + 1}${state.variant ? ' · edited version' : ' · original'}` : 'Animation in progress';
   $('selected-description').textContent = description(job);
   $('candidate-count').textContent = String(job.status === 'completed' ? sampleCount(job) : 0);
   $('candidates-list').replaceChildren(); $('diagnostic-note').textContent = '';
-  $('metrics').replaceChildren(metric('Duration', `${duration(job).toFixed(2)} s`), metric('Frames', String(job.manifest?.frames ?? '—')), metric('Seed', String(job.request?.seed ?? '—')));
+  const timing = selectedTiming();
+  $('metrics').replaceChildren(metric('Duration', timing.frames && timing.fps ? `${(timing.frames / timing.fps).toFixed(2)} s` : `${duration(job).toFixed(2)} s`), metric('Frames', String(timing.frames ?? '—')), metric('Seed', String(job.request?.seed ?? '—')));
+  const format = job.manifest?.skeleton?.startsWith('soma') ? 'bvh' : job.manifest?.skeleton?.startsWith('smpl') ? 'amass' : 'csv';
+  $('motion-export-format').value = format;
+  [...$('motion-export-format').options].forEach(option => { option.disabled = option.value !== format; });
   if (job.status !== 'completed') {
     $('candidates-list').append(el('div', 'empty-inline', ['failed', 'cancelled'].includes(job.status) ? 'This job has no completed candidates. Revise or retry its saved request.' : 'Candidates appear after generation finishes. You can keep creating while this job runs.'));
-    viewer?.clear(); state.previewUrl = null; state.previewLoaded = false;
+    viewer?.clear(); rigPanel?.clear(); state.previewUrl = null; state.previewLoaded = false;
     viewerMessage(job.status === 'failed' ? 'Generation needs attention' : job.status === 'cancelled' ? 'Generation cancelled' : 'Your animation is on its way', 'The completed character preview will appear after you build the selected candidate.');
     return;
   }
+  rigPanel?.load(job, state.sample, state.variant);
+  refreshVerifiedOutputs(jobId(job)).catch(error => { if (token === state.inspecting) notice(`Downloads could not refresh: ${error.message}`, true); });
   for (let index = 0; index < sampleCount(job); index++) {
     const button = el('button', 'candidate'); button.setAttribute('aria-pressed', String(index === state.sample));
-    button.append(el('strong', '', `Candidate ${index + 1}`), el('small', '', `${job.manifest?.frames ?? '—'} frames · ${job.manifest?.fps ?? 30} fps`), el('small', '', selectedPreview(job, index) ? 'Character preview ready' : 'Motion ready · build preview'));
+    const version = index === state.sample ? state.variant : null;
+    const available = selectedPreview(job, index, version);
+    const clip = version ? job.variants?.find(item => item.variant_id === version && item.sample_index === index) : job.manifest;
+    button.append(el('strong', '', `Candidate ${index + 1}`), el('small', '', `${clip?.frames ?? '—'} frames · ${clip?.fps ?? 30} fps`), el('small', '', available ? `${version ? 'Edited' : 'Original'} preview ready` : `${version ? 'Edited motion' : 'Original motion'} ready · build preview`));
     if (index === state.sample) button.append(el('span', 'candidate-mark', '✓'));
     button.addEventListener('click', () => selectJob(jobId(job), index)); $('candidates-list').append(button);
   }
-  const preview = selectedPreview(job, state.sample);
+  const preview = selectedPreview(job, state.sample, state.variant);
   if (!preview || !loadPreview(preview.url)) {
-    viewer?.clear(); state.previewUrl = null; state.previewLoaded = false; $('asset-label').textContent = 'Motion ready';
+    viewer?.clear(); state.previewUrl = null; state.previewLoaded = false; if (state.viewerMode === 'character') $('asset-label').textContent = 'Motion ready';
     viewerMessage('Bring this motion to your character', 'Build the character preview to rig and retarget this candidate in Blender. The original motion stays saved.');
   }
   try {
-    const result = await action('analyze_motion_quality', { job_id: jobId(job), name: sampleName(state.sample) });
+    const result = await action('analyze_motion_quality', { job_id: jobId(job), name: sampleName(state.sample), ...variantArgs(state.variant) });
     if (token !== state.inspecting) return;
     const labels = { contact_sliding: 'Contact sliding', jerk: 'Peak jerk', bone_length_drift: 'Bone drift' };
     for (const [key, label] of Object.entries(labels)) {
@@ -334,20 +420,20 @@ async function refresh() {
     enableActions();
   } finally { state.polling = false; }
 }
-$('refresh').addEventListener('click', refresh);
+$('refresh').addEventListener('click', () => { state.selectionSignature = ''; refresh(); });
 
 async function buildPreview(button) {
-  const job = current(), index = state.sample, key = currentKey();
+  const job = current(), index = state.sample, variant = state.variant, key = currentKey();
   if (job?.status !== 'completed') return;
   await withBusy(button, async () => {
     $('export-status').textContent = 'Preparing the fitted character and executing the checked Blender handoff…';
-    const result = await action('build_character_preview', { job_id: jobId(job), sample_index: index });
+    const result = await action('build_character_preview', { job_id: jobId(job), sample_index: index, ...variantArgs(variant) });
     if (!safeLocalUrl(result.url)) throw new Error('Blender finished but did not return a usable local preview URL. Refresh the workspace to check the export.');
-    const preview = { sample_index: index, url: result.url, attempt: result.attempt, exports: result.exports ?? [] };
+    const preview = { sample_index: index, variant_id: variant, url: result.url, attempt: result.attempt, exports: result.exports ?? [] };
     state.previews.set(key, preview);
     $('export-status').textContent = 'Blender finished. The character and animation have been saved.';
     notice('Character preview ready. You can inspect it or import it into Unreal.');
-    if (currentKey() === key) { state.selectionSignature = ''; renderSelection(); }
+    if (currentKey() === key) { state.selectionSignature = ''; setViewerMode('character'); renderSelection(); }
     await refresh();
   }, 'Building the character preview in Blender. This can take a few minutes.');
 }
@@ -355,13 +441,13 @@ $('build-preview').addEventListener('click', () => buildPreview($('build-preview
 $('send-blender').addEventListener('click', () => buildPreview($('send-blender')));
 
 $('review').addEventListener('click', () => {
-  const job = current(), sample = state.sample;
+  const job = current(), sample = state.sample, variant = state.variant;
   if (!job) return;
   // Reserve a tab during the user gesture; async popup creation is often blocked.
   const tab = window.open('about:blank', '_blank'); if (tab) tab.opener = null;
   withBusy($('review'), async () => {
     try {
-      const result = await action('create_motion_review', { job_id: jobId(job), name: sampleName(sample) });
+      const result = await action('create_motion_review', { job_id: jobId(job), name: sampleName(sample), ...variantArgs(variant) });
       const url = safeLocalUrl(result.url);
       if (!url) throw new Error('The review was created but no local browser URL was returned.');
       if (tab) tab.location.href = url; else { const link = el('a', '', 'Open the completed frame review'); link.href = url; link.target = '_blank'; link.rel = 'noopener'; $('diagnostic-note').replaceChildren(link); }
@@ -372,9 +458,9 @@ $('review').addEventListener('click', () => {
 $('compare').addEventListener('click', () => {
   const target = $('compare-target').value;
   if (!target) { notice('Choose a completed candidate to compare.', true); return; }
-  const [otherJob, sample] = target.split(':'), offset = Number($('compare-offset').value);
+  const [otherJob, sample, otherVariant] = target.split(':'), offset = Number($('compare-offset').value);
   if (!Number.isInteger(offset) || Math.abs(offset) > 2400) { notice('Frame offset must be a whole number between −2400 and 2400.', true); return; }
-  const args = { job_id: state.selected, other_job_id: otherJob, name: sampleName(state.sample), other_name: sampleName(Number(sample)), offset_frames: offset, space: $('compare-space').value };
+  const args = { job_id: state.selected, other_job_id: otherJob, name: sampleName(state.sample), other_name: sampleName(Number(sample)), offset_frames: offset, space: $('compare-space').value, ...variantArgs(state.variant), ...(otherVariant ? { other_variant_id: otherVariant } : {}) };
   const tab = window.open('about:blank', '_blank'); if (tab) tab.opener = null;
   withBusy($('compare'), async () => {
     try {
@@ -387,15 +473,15 @@ $('compare').addEventListener('click', () => {
 $('close-log').addEventListener('click', () => $('log-dialog').close());
 
 $('send-unreal').addEventListener('click', () => withBusy($('send-unreal'), async () => {
-  const job = current(), sample = state.sample;
+  const job = current(), sample = state.sample, variant = state.variant;
   if (!job) return;
-  const preview = selectedPreview(job, sample);
+  const preview = selectedPreview(job, sample, variant);
   if (!preview) throw new Error('Build this candidate’s character preview first so Unreal imports the matching rig.');
   const target = {};
   for (const [field, id] of Object.entries({ project_file: 'ue-project', skeleton_path: 'ue-skeleton', skeletal_mesh_path: 'ue-mesh', destination_path: 'ue-destination', asset_name: 'ue-name' })) {
     target[field] = $(id).value.trim(); if (!target[field]) { $(id).focus(); throw new Error('Complete every Unreal target field before importing.'); }
   }
-  const args = { job_id: jobId(job), source_kind: 'character', sample_index: sample, attempt: preview.attempt ?? 0, target };
+  const args = { job_id: jobId(job), source_kind: 'character', sample_index: sample, attempt: preview.attempt ?? 0, target, ...variantArgs(variant) };
   $('export-status').textContent = 'Checking the Unreal target and preparing the import…';
   await action('prepare_unreal_handoff', args);
   $('export-status').textContent = 'Importing into the matching open Unreal project…';
@@ -403,6 +489,16 @@ $('send-unreal').addEventListener('click', () => withBusy($('send-unreal'), asyn
   const report = result.report ?? result;
   $('export-status').textContent = `Unreal import completed. ${report.animation_asset ?? report.asset_path ?? target.destination_path + '/' + target.asset_name}`;
   notice('Animation imported and checked in Unreal.');
+}));
+
+$('export-motion').addEventListener('click', () => withBusy($('export-motion'), async () => {
+  const id = state.selected;
+  const result = await action('export_motion', { job_id: id, sample_index: state.sample, format: $('motion-export-format').value, ...variantArgs(state.variant) });
+  const url = safeLocalUrl(result.artifact?.url);
+  if (!url) throw new Error('Export completed without a browser download URL. Refresh the verified output list.');
+  await refreshVerifiedOutputs(id);
+  $('export-status').textContent = 'Motion file exported. The selected version’s frame count and frame rate are preserved.';
+  notice('Motion export completed. Its verified file is available under Motion details.'); await refresh();
 }));
 
 function setTab(name) {

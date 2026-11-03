@@ -357,6 +357,16 @@ For an NPZ-only SOMA job, pass the returned `export_id` to `prepare_blender_hand
 
 Read the [detailed change log](CHANGELOG.md) for numerical assessment and generation-planning improvements.
 
+## Find and fix joints in the studio
+
+![Focused rig editor with an actual saved forearm correction, full skeleton context, original ghost, and frame-window controls](docs/images/studio-rig-inspector.jpg)
+
+Select a completed candidate and choose **Source rig**. Click a joint in the viewer or search by name. Search narrows the joint list while keeping the skeleton visible. Use body-region filters, **Isolate selected chain**, joint labels and front/side/top camera views to inspect specific parts. On desktop, **Focus rig editor** places the viewer beside the controls; **Show full studio** returns to creation and history.
+
+For a small correction, enter local X/Y/Z offsets in degrees, choose the original start/end frames and blend length, then **Stage joint correction**. Undo, redo or reset the draft before **Save & inspect new version**. The viewer shows the selected saved motion until the backend validates and saves the edit. Every version remains selectable. **Original ghost** compares matching original frames, including after trimming; **Fitted character** separately shows the selected version's verified character preview when available.
+
+The screenshot is a real 120-frame source animation with a saved five-degree forearm correction, viewed at original frame 60. It is not a generated mockup. Read the [studio guide](docs/studio.md#inspect-and-correct-the-source-rig) for controls and keyboard shortcuts, and the [MCP correction guide](docs/rig-corrections.md) to perform the same edits through an assistant.
+
 ## Correct an existing animation through MCP
 
 Use `inspect_motion_rig` to identify the actual source joints and their local axes, then `inspect_motion_frames` to examine the problem in context. `create_motion_variant` accepts explicit local rotation offsets, a source-frame window and smooth blending at its edges. It creates a separate corrected version without rerunning the model. Trimming and planar placement are also supported. The original stays available.
