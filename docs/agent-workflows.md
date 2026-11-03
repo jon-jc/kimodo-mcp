@@ -28,6 +28,7 @@ Call `get_workflow` with one of these identifiers:
 | `revise` | Change selected fields while preserving the original request and outputs. |
 | `reuse-pose` | Inspect a source pose and anchor a new animation to it. |
 | `inspect` | Read timing, selected frames, physical diagnostics, and a visual review. |
+| `assess-candidates` | Check up to eight completed takes against an explicit policy and inspect problem windows. |
 | `compare` | Compare compatible samples with explicit frame alignment. |
 | `export-motion` | Convert completed managed motion to a compatible interchange format without inference. |
 | `export-skeleton` | Prepare and execute the fixed Blender SOMA skeleton export. |
@@ -59,6 +60,7 @@ Keep the actual job, sample, `source_kind`, and attempt consistent across prepar
 | `animation_brief` | Natural description, duration or beats, effort, candidates, seed, and model. |
 | `animation_revision` | Explicit changes to an existing request. |
 | `pose_reference` | A source job, sample index, and zero-based frame. |
+| `quality_policy` | Required numerical checks, caller-authored limits, contact/floor assumptions and explicit loop intent. |
 | `quality_thresholds` | Diagnostic sensitivities in physical units. |
 | `unreal_target` | Exact project, Skeleton, SkeletalMesh, destination directory, and asset name. |
 
@@ -89,6 +91,8 @@ For more than ten seconds, provide explicit timed beats. Each beat is a separate
 
 Use `revise_animation` with a rewritten description or explicit replacement beats. Its default `submit=false` only plans the change. With `submit=true`, it creates a new job and records parent lineage. Unmentioned settings remain unchanged. Timing changes never silently shift existing constraints; deliberately clear or rebuild them. An exact retry uses the saved `get_job.request` with `generate_motion`.
 
+Plans expose `segment_timeline`, `constraint_density`, and `advisories`. All planning ranges are zero-based, half-open. Later segments generate extra transition history and may reprocess the preceding segment's tail; this does not remove the requested action frames. The sparse-constraint advisory counts unique frames per effective upstream constraint type and segment, including end-effector expansion; dense root paths are exempt. Warnings are guidance, not hidden request changes or new hard limits.
+
 See [natural workflow details](natural-workflow.md) and [advanced animation controls](animation-workflows.md).
 
 ## Work with actual frames and constraints
@@ -113,6 +117,36 @@ Use `inspect_motion`, `analyze_motion_quality`, and `create_motion_review` to in
 `compare_motions` compares two completed samples with matching FPS and skeleton structure. The jobs may be identical when comparing two candidates from one run. A positive offset compares first-clip frame `i` with second-clip frame `i + offset_frames`. Start in `world` space to see translation; `root_relative` removes each frame's root translation while retaining heading and scale. The comparison does not retarget, resample, repair, or blend.
 
 Choose a candidate based on observed motion, intended action, and downstream deformation. Keep the original request, model, seed, output hashes, and the reason for the selection. [Review methodology](animate-review.md) explains the diagnostics and their limits.
+
+## Apply explicit numerical policies
+
+Call `get_input_schema("quality_policy")` and `get_workflow("assess-candidates")`. Choose limits for the intended action; an idle, sprint and stylized impact need different review criteria. These example limits demonstrate the API and are not production defaults:
+
+```json
+{
+  "tool": "assess_motion_candidates",
+  "arguments": {
+    "candidates": [{"job_id": "<completed-job-id>", "sample_index": 0}],
+    "policy": {
+      "checks": [
+        {"metric": "bone_length_drift", "max_value": 0.005},
+        {"metric": "contact_sliding", "max_value": 0.05}
+      ],
+      "contact_probability": 0.5,
+      "floor_y_m": 0,
+      "loop_intent": false
+    }
+  }
+}
+```
+
+`assess_motion_quality` evaluates one job/sample with the same policy. Each requested check is required and reports `pass`, `fail`, or `unavailable`. Overall status is `fail` if any requested check fails, otherwise `unavailable` if evidence is missing, otherwise `pass`. Batch results keep input order and never select a winner. Invalid or changed sources reject the batch; unsupported metric evidence remains a per-check unavailable result.
+
+Supported metrics are speed (m/s), acceleration (m/s²), jerk (m/s³), angular speed (rad/s), bone-length drift (m), contact sliding (m/s), a foot-pivot floor proxy (m), and explicit loop endpoint checks (pose/displacement in m, velocity in m/s). Loop checks require `loop_intent=true`; root-relative comparison removes translation only. Foot pivots do not measure soles or mesh collisions. Predicted contacts do not establish actual support. Acceleration and jerk use unsmoothed differences, so inspect the source before attributing a high value to a defect.
+
+Reports bind the source and normalized policy by SHA-256 and retain job/sample, generation request hash and batch seed. Each check identifies its peak and up to 16 problem windows, prioritized by peak severity then presented chronologically. Counts and truncation flags retain visibility of omitted windows; up to 24 review frames provide bounded follow-up. Assessment frame ranges are **zero-based inclusive**, unlike half-open planning ranges. Derivative windows include every contributing source frame; loop boundary ranges remain separate. Bone drift references frame zero, which is not itself a detected problem.
+
+Use `inspect_motion_frames` to inspect the returned ranges and `create_motion_review` to see motion in context. Repeat assessment with the identical policy after a deliberate revision. Numerical compliance cannot establish acting, prompt adherence, skin deformation, collision-free contact, or production readiness. Keep human review and downstream character/engine validation in the workflow.
 
 ## Use shared studio settings and verified exports
 

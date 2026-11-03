@@ -61,6 +61,8 @@ _ACTIONS = {
     "inspect_motion_frames",
     "extract_motion_constraints",
     "export_motion",
+    "assess_motion_quality",
+    "assess_motion_candidates",
 }
 
 

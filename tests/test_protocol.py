@@ -20,7 +20,7 @@ EXPECTED_TOOLS = {
     "prepare_unreal_handoff", "execute_unreal_handoff", "get_unreal_report", "get_capabilities",
     "get_workflow", "get_input_schema", "get_workspace_state", "get_unreal_target", "save_unreal_target",
     "build_character_preview", "list_job_outputs", "inspect_motion_frames", "extract_motion_constraints",
-    "export_motion",
+    "export_motion", "assess_motion_quality", "assess_motion_candidates",
 }
 
 
@@ -47,14 +47,14 @@ async def assert_agent_discovery(session):
     }
     assert all(template.mimeType == "application/json" and template.description for template in templates)
     for name in ("generate_request", "animation_brief", "animation_revision", "pose_reference",
-                 "quality_thresholds", "unreal_target"):
+                 "quality_thresholds", "unreal_target", "quality_policy"):
         tool_schema = await session.call_tool("get_input_schema", {"schema_name": name})
         resource_schema = await session.read_resource(f"kimodo://schemas/{name}")
         assert not tool_schema.isError
         assert tool_schema.structuredContent == json.loads(resource_schema.contents[0].text)
         assert tool_schema.structuredContent["type"] == "object"
     for name in ("generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-                 "export-character", "import-unreal", "recover-job"):
+                 "export-character", "import-unreal", "recover-job", "assess-candidates"):
         recipe = await session.call_tool("get_workflow", {"workflow": name})
         resource_recipe = await session.read_resource(f"kimodo://workflows/{name}")
         assert not recipe.isError

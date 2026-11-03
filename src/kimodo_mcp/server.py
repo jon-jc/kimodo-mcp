@@ -18,6 +18,7 @@ from pydantic import Field, StrictInt
 
 from .artifacts import create_preview
 from .artifacts import inspect_motion as inspect_archive
+from .assessment import CandidateReference, QualityPolicy
 from .capabilities import (
     SchemaName,
     WorkflowName,
@@ -64,7 +65,8 @@ def create_server(
             "the complete typed controls. Use plan_animation then generate_animation for natural briefs; "
             "validate_motion then generate_motion for explicit constraints. Use revise_animation for "
             "preserved revisions and inspect_motion_frames/extract_motion_constraints for actual source poses. "
-            "Poll get_job; submission is not completion. Inspect diagnostics and frame reviews before selecting. "
+            "Poll get_job; submission is not completion. Read planning advisories, then use assess_motion_candidates "
+            "with an explicit quality_policy and inspect the returned problem frames before selecting. "
             "Use export_motion to convert completed NPZ into a compatible format without regeneration. "
             "Use build_character_preview for the registered character, list_job_outputs for verified exports, "
             "and explicit matching project/rig targets for Unreal. Never blindly retry uncertain editor dispatch. "
@@ -432,6 +434,58 @@ def create_server(
         artifact = motion_artifact(job_id, name)
         return analyze_motion(artifact["absolute_path"], thresholds=thresholds.model_dump() if thresholds else None)
 
+    def assess_candidate(candidate: CandidateReference, policy: QualityPolicy) -> dict[str, Any]:
+        from .assessment import assess_motion
+
+        artifact = motion_artifact(candidate.job_id, f"motion_{candidate.sample_index:02d}.npz")
+        result = assess_motion(artifact["absolute_path"], policy=policy, expected_source_sha256=artifact["sha256"])
+        workspace.verified_native_output(candidate.job_id, artifact["path"])
+        original = store.get(candidate.job_id)
+        return {**result, "source": {**candidate.model_dump(), "sha256": artifact["sha256"],
+                                     "generation_seed": original.get("request", {}).get("seed"),
+                                     "request_sha256": hashlib.sha256(json.dumps(
+                                         original.get("request", {}), sort_keys=True, separators=(",", ":"),
+                                     ).encode()).hexdigest(),
+                                     "seed_scope": "generation_batch"}}
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def assess_motion_quality(
+        job_id: str, policy: QualityPolicy, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+    ) -> dict[str, Any]:
+        """Check an actual motion against explicit numerical limits and identify exact problem-frame windows.
+
+        Every requested check reports pass, fail or unavailable. Limits are authored for the intended
+        action; no universal quality score is supplied. Loop checks require explicit looping intent.
+        Numerical compliance does not approve artistic intent, contact appearance or character deformation.
+        """
+        return await asyncio.to_thread(
+            assess_candidate, CandidateReference(job_id=job_id, sample_index=sample_index), policy,
+        )
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def assess_motion_candidates(
+        candidates: Annotated[list[CandidateReference], Field(min_length=1, max_length=8)], policy: QualityPolicy,
+    ) -> dict[str, Any]:
+        """Assess up to eight distinct completed takes under one explicit numerical policy, preserving input order.
+
+        Returns source-bound results and problem frames for each take. It does not rank artistic quality
+        or automatically select a winner. A batch seed and sample index jointly identify a generated take.
+        Invalid or changed sources reject the batch; unavailable numerical evidence is reported per check.
+        """
+        identities = [(candidate.job_id, candidate.sample_index) for candidate in candidates]
+        if len(set(identities)) != len(identities):
+            raise ValueError("Choose distinct job/sample candidates")
+        results = []
+        for candidate in candidates:
+            results.append(await asyncio.to_thread(assess_candidate, candidate, policy))
+        return {
+            "schema_version": 1, "policy": results[0]["policy"],
+            "policy_sha256": results[0]["policy_sha256"], "candidates": results,
+            "counts": {status: sum(result["status"] == status for result in results)
+                       for status in ("pass", "fail", "unavailable")},
+            "ordering": "input_order", "automatic_selection": False, "human_review_required": True,
+        }
+
     @mcp.tool(annotations=LOCAL_WRITE)
     def create_motion_review(
         job_id: str, name: str = "motion_00.npz", thresholds: QualityThresholds | None = None,
@@ -722,13 +776,16 @@ def create_server(
             "1. Read get_capabilities and get_workflow('generate'); check get_workspace_state(probe_runtime=true).\n"
             "2. Use plan_animation for a natural brief, with explicit duration, seed and model. "
             "For multiple actions supply timed beats. For advanced controls use get_input_schema('generate_request') "
-            "and validate_motion. Ask for missing artistic decisions only when necessary.\n"
+            "and validate_motion. Read segment_timeline, constraint_density and advisories before submission. "
+            "Ask for missing artistic decisions only when necessary.\n"
             "3. Submit the agreed plan through generate_animation or generate_motion; poll get_job until completed. "
             "Use get_job_log on failure and never describe a queued job as a finished animation.\n"
             "4. Use revise_animation to preserve unedited settings. Use inspect_motion_frames and "
             "extract_motion_constraints to select actual source poses; validate the new complete request.\n"
             "5. Call inspect_motion, analyze_motion_quality and create_motion_review on each candidate NPZ. "
-            "Use compare_motions for matching-rig candidates; inspect contact sliding, sudden changes, "
+            "Use assess_motion_candidates with explicit numerical limits and inspect its issue windows; "
+            "unavailable evidence never counts as a pass. Use compare_motions for matching-rig candidates; "
+            "inspect contact sliding, sudden changes, "
             "prompt adherence and selected frames before choosing. Keep original samples; diagnostics "
             "do not prove realism or justify blind smoothing. Use list_job_outputs to discover verified exports. "
             "Use export_motion for compatible BVH/AMASS/CSV conversion without regenerating a completed NPZ.\n"

@@ -199,12 +199,125 @@ class GenerateRequest(StrictModel):
             raise ValueError("Transition frames must be less than the shortest segment.")
         if any(index >= total for constraint in self.constraints for index in constraint.frame_indices):
             raise ValueError("Constraint frame index is outside the requested motion.")
+        timeline = self._segment_timeline(frames)
+        density = self._constraint_density(timeline)
+        advisories = []
+        if len(frames) > 1:
+            advisories.append({
+                "code": "transition_context", "severity": "info",
+                "message": (
+                    "Each later segment generates extra history and revises the preceding segment's tail. "
+                    "Requested action frames are preserved; semantic settling time is not measurable in advance."
+                ),
+                "action": (
+                    "Review the incoming overlap and the beginning of each later beat. "
+                    "Describe each beat independently and allow time for the intended change of action."
+                ),
+                "segment_indices": list(range(1, len(frames))),
+            })
+        for entry in density:
+            if not entry["sparse_recommendation_exempt"] and entry["unique_frames"] >= 20:
+                advisories.append({
+                    "code": "sparse_constraint_density", "severity": "warning",
+                    "message": (
+                        "Upstream recommends fewer than 20 authored keyframes per constraint type, "
+                        "except dense root paths. This is guidance, not a request validity limit."
+                    ),
+                    "action": (
+                        "Keep essential poses and remove redundant keyframes where practical. "
+                        "Review per-segment counts when constraints span several prompts."
+                    ),
+                    "constraint_type": entry["constraint_type"],
+                    "unique_frames": entry["unique_frames"],
+                    "segment_frame_counts": entry["segment_frame_counts"],
+                    "recommended_max_unique_frames": 19,
+                })
+        if self.constraints and not self.effective_postprocess:
+            supported = model_info(self.model)["postprocess_supported"]
+            advisories.append({
+                "code": "constraint_postprocess_disabled", "severity": "warning",
+                "message": (
+                    "Native postprocessing is disabled; generated motion may skate or miss constraints. "
+                    "Postprocessing is not a guarantee of constraint accuracy."
+                ),
+                "action": (
+                    "Consider postprocess=true when contact or constraint accuracy matters, then review the output."
+                    if supported else
+                    "This model does not support bridge postprocessing; review constraint and contact accuracy manually."
+                ),
+                "postprocess_supported": supported,
+            })
         return {
             "fps": fps, "segment_frames": frames, "total_frames": total,
             "duration_seconds": total / fps, "samples": self.samples,
             "postprocess": self.effective_postprocess, "formats": list(self.formats),
             "model": self.model,
+            "frame_range_convention": "zero_based_half_open",
+            "segment_timeline": timeline, "constraint_density": density,
+            "advisories": advisories,
         }
+
+    def _segment_timeline(self, frames: list[int]) -> list[dict]:
+        """Mirror the reviewed upstream _multiprompt overlap schedule without inference.
+
+        The later prompt generates T extra history samples, replacing the previous
+        prompt's final T output samples. It does not discard T samples from the
+        later prompt. Native postprocessing corrects history plus action together;
+        without it, upstream blends the history in motion-feature space.
+        """
+        timeline = []
+        start = 0
+        for index, count in enumerate(frames):
+            incoming = self.transition_frames if index else 0
+            outgoing = self.transition_frames if index < len(frames) - 1 else 0
+            timeline.append({
+                "segment_index": index,
+                "start_frame": start, "end_frame_exclusive": start + count,
+                "action_start_frame": start, "action_end_frame_exclusive": start + count,
+                "action_frames": count,
+                "incoming_transition_start_frame": start - incoming if incoming else None,
+                "incoming_transition_end_frame_exclusive": start if incoming else None,
+                "transition_frames": incoming, "generation_frames": count + incoming,
+                "transition_method": (
+                    "postprocess_history_and_action" if self.effective_postprocess else "blend_history_features"
+                ) if incoming else None,
+                "tail_reprocessed_frames": outgoing,
+                "untouched_action_frames": count - outgoing,
+            })
+            start += count
+        return timeline
+
+    def _constraint_density(self, timeline: list[dict]) -> list[dict]:
+        """Count unique authored frames, not duplicate sets or automatic history poses.
+
+        Match the worker's named-limb expansion of generic end-effectors when
+        postprocessing is enabled. Counts describe constraint classes, not the
+        overlapping feature masks that are checked separately at runtime.
+        """
+        frames_by_type: dict[str, set[int]] = {}
+        limb_types = {
+            "LeftHand": "left-hand", "RightHand": "right-hand",
+            "LeftFoot": "left-foot", "RightFoot": "right-foot",
+        }
+        for constraint in self.constraints:
+            types = (
+                [limb_types[name] for name in constraint.joint_names]
+                if isinstance(constraint, EndEffectorConstraint) and self.effective_postprocess
+                else [constraint.type]
+            )
+            for kind in types:
+                frames_by_type.setdefault(kind, set()).update(constraint.frame_indices)
+        return [
+            {
+                "constraint_type": kind, "unique_frames": len(indices),
+                "segment_frame_counts": [
+                    sum(segment["start_frame"] <= frame < segment["end_frame_exclusive"] for frame in indices)
+                    for segment in timeline
+                ],
+                "sparse_recommendation_exempt": kind == "root2d",
+            }
+            for kind, indices in sorted(frames_by_type.items())
+        ]
 
 
 def validated_plan(request: GenerateRequest, fps: float = 30.0) -> dict:
