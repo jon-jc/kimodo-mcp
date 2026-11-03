@@ -7,6 +7,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 from pathlib import Path
@@ -34,13 +35,14 @@ from .handoff import prepare_blender_handoff as prepare_blender_files
 from .handoff import prepare_character_handoff as prepare_character_files
 from .handoff import prepare_unreal_handoff as prepare_unreal_files
 from .jobs import contained_file, redact
+from .motion_variants import SHA, VariantEdit
 from .planning import AnimationBrief, AnimationRevision, PoseReference, plan_revision
 from .planning import plan_animation as compile_animation_plan
 from .quality import analyze_motion, compare_motion
 from .review import compare_motion_reviews
 from .review import create_motion_review as create_review_file
 from .schemas import GenerateRequest, QualityThresholds
-from .workspace import Workspace
+from .workspace import Workspace, handoff_directory_name
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 LOCAL_WRITE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False)
@@ -67,6 +69,8 @@ def create_server(
             "preserved revisions and inspect_motion_frames/extract_motion_constraints for actual source poses. "
             "Poll get_job; submission is not completion. Read planning advisories, then use assess_motion_candidates "
             "with an explicit quality_policy and inspect the returned problem frames before selecting. "
+            "Use inspect_motion_rig and create_motion_variant for precise local joint corrections without inference; "
+            "retain variant_id through all selected-version calls, including exports and editor handoffs. "
             "Use export_motion to convert completed NPZ into a compatible format without regeneration. "
             "Use build_character_preview for the registered character, list_job_outputs for verified exports, "
             "and explicit matching project/rig targets for Unreal. Never blindly retry uncertain editor dispatch. "
@@ -183,6 +187,7 @@ def create_server(
     def build_character_preview(
         job_id: str, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
         attempt: Annotated[StrictInt, Field(ge=0, le=99)] | None = None,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Prepare, execute and verify a registered character preview through the same workflow as the studio.
 
@@ -191,6 +196,7 @@ def create_server(
         """
         return workspace.build_character_preview(
             job_id, sample_index, attempt, prepare=prepare_character_handoff, execute=execute_blender_handoff,
+            **({"variant_id": variant_id} if variant_id is not None else {}),
         )
 
     @mcp.tool(annotations=READ_ONLY)
@@ -208,7 +214,7 @@ def create_server(
         if start_from is not None:
             from .pose import anchor_start
 
-            artifact = motion_artifact(start_from.job_id, f"motion_{start_from.sample_index:02d}.npz")
+            artifact = motion_artifact(start_from.job_id, f"motion_{start_from.sample_index:02d}.npz", start_from.variant_id)
             request = anchor_start(GenerateRequest.model_validate(plan["request"]),
                                    artifact["absolute_path"], source_frame=start_from.frame)
             plan.update(request=request.model_dump(mode="json"), plan=request.validated_plan(),
@@ -256,7 +262,7 @@ def create_server(
     @mcp.tool(annotations=READ_ONLY)
     def get_job(job_id: str) -> dict[str, Any]:
         """Get durable status, current stage, request, and final export manifest."""
-        return store.get(job_id)
+        return workspace.job_details(job_id)
 
     @mcp.tool(annotations=READ_ONLY)
     def list_jobs(limit: Annotated[int, Field(ge=1, le=100)] = 20) -> dict[str, Any]:
@@ -281,28 +287,90 @@ def create_server(
         return artifact
 
     @mcp.tool(annotations=READ_ONLY)
-    def inspect_motion(job_id: str, name: str = "motion_00.npz") -> dict[str, Any]:
+    def inspect_motion(job_id: str, name: str = "motion_00.npz", variant_id: SHA | None = None) -> dict[str, Any]:
         """Measure a completed NPZ: timing, skeleton, root travel, bounds and finite-value checks."""
-        artifact = motion_artifact(job_id, name)
+        artifact = motion_artifact(job_id, name, variant_id)
         if artifact["format"] != "npz":
             raise ValueError("Inspection requires a native Kimodo NPZ artifact")
         return inspect_archive(artifact["absolute_path"])
 
     @mcp.tool(annotations=LOCAL_WRITE)
-    def preview_motion(job_id: str, name: str = "motion_00.npz") -> dict[str, Any]:
+    def preview_motion(job_id: str, name: str = "motion_00.npz", variant_id: SHA | None = None) -> dict[str, Any]:
         """Create an offline HTML animation viewer with playback, scrubber and camera controls."""
-        artifact = motion_artifact(job_id, name)
+        artifact = motion_artifact(job_id, name, variant_id)
         if artifact["format"] != "npz":
             raise ValueError("Preview requires a native Kimodo NPZ artifact")
-        target = store.directory(job_id) / (name.removesuffix(".npz") + "_preview.html")
+        target = review_path(job_id, "preview-" + artifact["sha256"][:20], ".html")
         return create_preview(artifact["absolute_path"], target)
 
-    def motion_artifact(job_id: str, name: str) -> dict[str, Any]:
+    def motion_artifact(job_id: str, name: str, variant_id: str | None = None) -> dict[str, Any]:
+        if variant_id is not None:
+            match = re.fullmatch(r"motion_(0[0-3])\.npz", name)
+            if match is None:
+                raise ValueError("Choose the managed motion_XX.npz name for a variant")
+            return workspace.resolve_motion(job_id, int(match[1]), variant_id)
         artifact = store.artifact(job_id, name)
         if artifact["format"] != "npz":
             raise ValueError("Motion review requires a native Kimodo NPZ artifact")
         workspace.verified_native_output(job_id, name)
         return artifact
+
+    @mcp.tool(annotations=DERIVED_EXPORT)
+    async def create_motion_variant(
+        job_id: str, edit: VariantEdit, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+    ) -> dict[str, Any]:
+        """Save precise SOMA joint corrections, trim and planar placement without regenerating the motion.
+
+        Inspect the rig and original frames first. Local XYZ corrections are radians; windows are original
+        zero-based source frames with an exclusive end. Smoothstep blends preserve window boundaries.
+        Every edit is relative to the original sample: submit the complete desired edit to revise a variant.
+        Source files remain unchanged; identical edits reuse verified output. Effective joint corrections
+        invalidate predicted contacts. No automatic contact repair, anatomical solver or rig rebuilding runs.
+        """
+        from .motion_variants import create_motion_variant as save_variant
+
+        source = await asyncio.to_thread(motion_artifact, job_id, f"motion_{sample_index:02d}.npz")
+        result = await asyncio.to_thread(
+            save_variant, Path(source["absolute_path"]), source_sha256=source["sha256"],
+            job_id=job_id, sample_index=sample_index, edit=edit,
+        )
+        return await asyncio.to_thread(workspace.verified_motion_variant, job_id, result["variant_id"],
+                                       sample_index=sample_index)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_motion_variant(
+        job_id: str, variant_id: SHA, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+    ) -> dict[str, Any]:
+        """Verify a saved correction and return its exact edit, original source, timing and output checksum.
+
+        Use get_job to discover saved variants. Keep variant_id on all subsequent motion and editor calls.
+        To revise, submit a complete edit against the original sample with create_motion_variant.
+        """
+        return workspace.verified_motion_variant(job_id, variant_id, sample_index=sample_index)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def inspect_motion_rig(
+        job_id: str, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+        frame_index: Annotated[StrictInt, Field(ge=0, le=2399)] = 0, variant_id: SHA | None = None,
+    ) -> dict[str, Any]:
+        """Inspect every joint, parent, body group, bone length and local axis for precise agent corrections.
+
+        Reads the source animation skeleton; the fitted character has a separate, smaller rig. Returns
+        edit eligibility and exact correction conventions. It does not change rest bones or skin weights.
+        """
+        from .rig_access import inspect_rig
+
+        name = f"motion_{sample_index:02d}.npz"
+        selected, original = motion_artifact(job_id, name, variant_id), motion_artifact(job_id, name)
+        result = inspect_rig(selected["absolute_path"], original_path=original["absolute_path"],
+                             frame_index=frame_index)
+        after = motion_artifact(job_id, name, variant_id)
+        if after["sha256"] != selected["sha256"]:
+            raise ValueError("Motion source changed during rig inspection")
+        return {**result, "job_id": job_id, "sample_index": sample_index, "variant_id": variant_id,
+                "source_sha256": selected["sha256"], "original_source_sha256": original["sha256"],
+                "source_range": selected.get("source_range", {"start_frame": 0,
+                                                               "end_frame_exclusive": result["frames"]})}
 
     @mcp.tool(annotations=DERIVED_EXPORT)
     async def export_motion(
@@ -311,6 +379,7 @@ def create_server(
         bvh_standard_tpose: Annotated[bool, Field(strict=True)] = False,
         amass_z_up: Annotated[bool, Field(strict=True)] = True,
         mujoco_rest_zero: Annotated[bool, Field(strict=True)] = False,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Convert a completed native NPZ into SOMA BVH, SMPL-X AMASS, or G1 MuJoCo CSV without generation.
 
@@ -321,14 +390,16 @@ def create_server(
         """
         from .export import export_motion as convert_motion
 
-        artifact = await asyncio.to_thread(motion_artifact, job_id, f"motion_{sample_index:02d}.npz")
+        artifact = await asyncio.to_thread(motion_artifact, job_id, f"motion_{sample_index:02d}.npz", variant_id)
         result = await asyncio.to_thread(
             convert_motion, settings, source_path=Path(artifact["absolute_path"]),
             source_sha256=artifact["sha256"], job_id=job_id, sample_index=sample_index, format=format,
             bvh_standard_tpose=bvh_standard_tpose, amass_z_up=amass_z_up, mujoco_rest_zero=mujoco_rest_zero,
+            **({"variant_id": variant_id} if variant_id is not None else {}),
         )
         verified = await asyncio.to_thread(
             workspace.verified_motion_export, job_id, result["export_id"], sample_index=sample_index,
+            **({"variant_id": variant_id} if variant_id is not None else {}),
         )
         return {**result, "artifact": {**result["artifact"], "uri": verified["uri"], "url": verified["url"]}}
 
@@ -341,6 +412,7 @@ def create_server(
         joint_names: Annotated[list[Annotated[str, Field(min_length=1, max_length=256, strict=True)]],
                                Field(min_length=1, max_length=32)] | None = None,
         include_rotations: Annotated[bool, Field(strict=True)] = False,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Read selected source frames as exact joint positions, hierarchy, timing and optional rotation matrices.
 
@@ -349,7 +421,7 @@ def create_server(
         """
         from .motion_access import inspect_motion_frames as inspect_frames
 
-        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz")
+        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz", variant_id)
         result = inspect_frames(artifact["absolute_path"], frame_indices=frame_indices,
                                 joint_names=joint_names, include_rotations=include_rotations)
         return {**result, "job_id": job_id, "sample_index": sample_index, "source_sha256": artifact["sha256"]}
@@ -363,6 +435,7 @@ def create_server(
                                  Field(min_length=1, max_length=128)],
         sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
         constraint_type: Literal["fullbody", "left-hand", "right-hand", "left-foot", "right-foot"] = "fullbody",
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Map several actual SOMA poses to destination frames as one reusable full-body or limb constraint.
 
@@ -372,7 +445,7 @@ def create_server(
         """
         from .motion_access import extract_motion_constraints as extract_constraints
 
-        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz")
+        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz", variant_id)
         model = store.get(job_id)["request"]["model"]
         result = extract_constraints(artifact["absolute_path"], source_frames=source_frames,
                                      target_frames=target_frames, target_model=model, constraint_type=constraint_type)
@@ -385,6 +458,7 @@ def create_server(
         target_frame: Annotated[int, Field(ge=0, le=2399)] = 0,
         sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
         constraint_type: Literal["fullbody", "left-hand", "right-hand", "left-foot", "right-foot"] = "fullbody",
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Reuse an actual SOMA pose as a constraint for a new generation, preserving its world position.
 
@@ -393,7 +467,7 @@ def create_server(
         """
         from .pose import extract_pose_constraint as extract_pose
 
-        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz")
+        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz", variant_id)
         model = store.get(job_id)["request"]["model"]
         constraint = extract_pose(artifact["absolute_path"], source_frame=source_frame,
                                   target_frame=target_frame, target_model=model, constraint_type=constraint_type)
@@ -426,20 +500,21 @@ def create_server(
     @mcp.tool(annotations=READ_ONLY)
     def analyze_motion_quality(
         job_id: str, name: str = "motion_00.npz", thresholds: QualityThresholds | None = None,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Measure speed, jerk, bone drift, contact sliding, floor proxies and endpoint seams.
 
         These are review diagnostics, not a realism score or automatic repair. Original motion is unchanged.
         """
-        artifact = motion_artifact(job_id, name)
+        artifact = motion_artifact(job_id, name, variant_id)
         return analyze_motion(artifact["absolute_path"], thresholds=thresholds.model_dump() if thresholds else None)
 
     def assess_candidate(candidate: CandidateReference, policy: QualityPolicy) -> dict[str, Any]:
         from .assessment import assess_motion
 
-        artifact = motion_artifact(candidate.job_id, f"motion_{candidate.sample_index:02d}.npz")
+        artifact = motion_artifact(candidate.job_id, f"motion_{candidate.sample_index:02d}.npz", candidate.variant_id)
         result = assess_motion(artifact["absolute_path"], policy=policy, expected_source_sha256=artifact["sha256"])
-        workspace.verified_native_output(candidate.job_id, artifact["path"])
+        motion_artifact(candidate.job_id, f"motion_{candidate.sample_index:02d}.npz", candidate.variant_id)
         original = store.get(candidate.job_id)
         return {**result, "source": {**candidate.model_dump(), "sha256": artifact["sha256"],
                                      "generation_seed": original.get("request", {}).get("seed"),
@@ -451,6 +526,7 @@ def create_server(
     @mcp.tool(annotations=READ_ONLY)
     async def assess_motion_quality(
         job_id: str, policy: QualityPolicy, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Check an actual motion against explicit numerical limits and identify exact problem-frame windows.
 
@@ -459,7 +535,7 @@ def create_server(
         Numerical compliance does not approve artistic intent, contact appearance or character deformation.
         """
         return await asyncio.to_thread(
-            assess_candidate, CandidateReference(job_id=job_id, sample_index=sample_index), policy,
+            assess_candidate, CandidateReference(job_id=job_id, sample_index=sample_index, variant_id=variant_id), policy,
         )
 
     @mcp.tool(annotations=READ_ONLY)
@@ -472,9 +548,9 @@ def create_server(
         or automatically select a winner. A batch seed and sample index jointly identify a generated take.
         Invalid or changed sources reject the batch; unavailable numerical evidence is reported per check.
         """
-        identities = [(candidate.job_id, candidate.sample_index) for candidate in candidates]
+        identities = [(candidate.job_id, candidate.sample_index, candidate.variant_id) for candidate in candidates]
         if len(set(identities)) != len(identities):
-            raise ValueError("Choose distinct job/sample candidates")
+            raise ValueError("Choose distinct job/sample/variant candidates")
         results = []
         for candidate in candidates:
             results.append(await asyncio.to_thread(assess_candidate, candidate, policy))
@@ -489,12 +565,13 @@ def create_server(
     @mcp.tool(annotations=LOCAL_WRITE)
     def create_motion_review(
         job_id: str, name: str = "motion_00.npz", thresholds: QualityThresholds | None = None,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Create an offline three-view player, exact-frame contact sheet and numerical diagnostic file.
 
         Highlights uniform timeline samples and metric extrema with fixed whole-clip camera bounds.
         """
-        artifact = motion_artifact(job_id, name)
+        artifact = motion_artifact(job_id, name, variant_id)
         report = analyze_motion(artifact["absolute_path"], thresholds=thresholds.model_dump() if thresholds else None)
         key = "motion-" + hashlib.sha256(json.dumps(
             [artifact["sha256"], report["thresholds"]], sort_keys=True,
@@ -509,13 +586,14 @@ def create_server(
         job_id: str, other_job_id: str, name: str = "motion_00.npz", other_name: str = "motion_00.npz",
         offset_frames: Annotated[int, Field(ge=-2400, le=2400)] = 0,
         space: Literal["world", "root_relative"] = "world",
+        variant_id: SHA | None = None, other_variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Compare two completed motion samples with synchronized exact-frame views and measured differences.
 
         Requires matching FPS and skeletons. B frame = A frame + offset. Root-relative removes translation only.
         Differences do not rank realism or prompt adherence; inspect both candidates before choosing.
         """
-        first, second = motion_artifact(job_id, name), motion_artifact(other_job_id, other_name)
+        first, second = motion_artifact(job_id, name, variant_id), motion_artifact(other_job_id, other_name, other_variant_id)
         report = compare_motion(first["absolute_path"], second["absolute_path"],
                                 second_offset_frames=offset_frames, space=space)
         key = "comparison-" + hashlib.sha256(json.dumps(
@@ -529,13 +607,15 @@ def create_server(
         write_review_report(report_path, report)
         return {**result, "diagnostics_path": str(report_path), "comparison": report}
 
-    def handoff_directory(job_id: str, source_kind: str, sample_index: int, attempt: int = 0) -> Path:
+    def handoff_directory(job_id: str, source_kind: str, sample_index: int, attempt: int = 0,
+                          variant_id: str | None = None) -> Path:
         job = store.get(job_id)
         if job["status"] != "completed" or sample_index >= job["manifest"]["samples"]:
             raise ValueError("Choose a sample from a completed generation job")
         base = store.directory(job_id)
-        suffix = f"-attempt{attempt:02d}" if attempt else ""
-        directory = (base / "handoffs" / f"{source_kind}-motion_{sample_index:02d}{suffix}").resolve()
+        if variant_id is not None:
+            workspace.resolve_motion(job_id, sample_index, variant_id)
+        directory = (base / "handoffs" / handoff_directory_name(source_kind, sample_index, attempt, variant_id)).resolve()
         if not directory.is_relative_to(base.resolve()):
             raise ValueError("Handoff directory escapes its job storage")
         return directory
@@ -574,6 +654,7 @@ def create_server(
     def prepare_character_handoff(
         job_id: str, sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
         attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Prepare Blender rigging, skinning and motion retargeting for the configured character.
 
@@ -583,38 +664,46 @@ def create_server(
         character = configured_character()
         if character is None:
             raise ValueError("Configure a supported character first; see get_character_profile")
-        artifact = store.artifact(job_id, f"motion_{sample_index:02d}.npz")
-        manifest = store.get(job_id)["manifest"]
+        artifact = motion_artifact(job_id, f"motion_{sample_index:02d}.npz", variant_id)
+        manifest = artifact if variant_id is not None else store.get(job_id)["manifest"]
         result = prepare_character_files(
             character, Path(artifact["absolute_path"]),
-            handoff_directory(job_id, "character", sample_index, attempt),
+            handoff_directory(job_id, "character", sample_index, attempt, variant_id),
             source_sha256=artifact["sha256"], fps=manifest["fps"], frames=manifest["frames"],
             sample_index=sample_index,
+            **({"variant_id": variant_id} if variant_id is not None else {}),
         )
-        return result.model_dump()
+        return {**result.model_dump(), "variant_id": variant_id}
 
     @mcp.tool(annotations=LOCAL_WRITE)
     def prepare_blender_handoff(
         job_id: str, sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
         attempt: Annotated[int, Field(ge=0, le=99)] = 0,
         export_id: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$", strict=True)] | None = None,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Prepare a trusted Blender script to import a generated SOMA BVH and save .blend/FBX.
 
         Omit export_id to use the original manifest BVH, or select the exact ID returned by export_motion
         to use a verified derived BVH. Use a new attempt when changing the source. No editor action runs.
         """
+        if variant_id is not None and export_id is None:
+            raise ValueError("Export the selected variant to BVH first and pass its exact export_id")
         if export_id is None:
             artifact = workspace.verified_native_output(job_id, f"motion_{sample_index:02d}.bvh")
         else:
-            artifact = workspace.verified_motion_export(job_id, export_id, sample_index=sample_index)
+            artifact = workspace.verified_motion_export(job_id, export_id, sample_index=sample_index,
+                                                        **({"variant_id": variant_id} if variant_id is not None else {}))
+            if artifact.get("variant_id") != variant_id:
+                raise ValueError("Export belongs to a different motion variant")
             if artifact["format"] != "bvh":
                 raise ValueError("The skeleton handoff requires a BVH export")
-        manifest = store.get(job_id)["manifest"]
+        manifest = workspace.resolve_motion(job_id, sample_index, variant_id) if variant_id is not None else store.get(job_id)["manifest"]
         result = prepare_blender_files(
-            Path(artifact["absolute_path"]), handoff_directory(job_id, "skeleton", sample_index, attempt),
+            Path(artifact["absolute_path"]), handoff_directory(job_id, "skeleton", sample_index, attempt, variant_id),
             fps=manifest["fps"], frames=manifest["frames"],
             source_sha256=artifact["sha256"], skeleton=manifest["skeleton"],
+            **({"variant_id": variant_id, "export_id": export_id, "sample_index": sample_index} if variant_id is not None else {}),
         )
         value = result.model_dump()
         if export_id is not None:
@@ -626,6 +715,7 @@ def create_server(
         job_id: str, source_kind: Literal["skeleton", "character"] = "character",
         sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
         attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Run only the prepared fixed script in the connected local Blender and verify its exports.
 
@@ -634,7 +724,7 @@ def create_server(
         """
         from .blender_bridge import execute_handoff
 
-        directory = handoff_directory(job_id, source_kind, sample_index, attempt)
+        directory = handoff_directory(job_id, source_kind, sample_index, attempt, variant_id)
         script = contained_file(directory, "character_handoff.py" if source_kind == "character" else "blender_handoff.py")
         return execute_handoff(script, source_kind)
 
@@ -643,9 +733,10 @@ def create_server(
         job_id: str, source_kind: Literal["skeleton", "character"] = "skeleton",
         sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
         attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Read the Blender execution report for a managed skeleton or fitted-character handoff."""
-        directory = handoff_directory(job_id, source_kind, sample_index, attempt)
+        directory = handoff_directory(job_id, source_kind, sample_index, attempt, variant_id)
         path = directory / "blender-report.json"
         if not path.is_file():
             status = "not_completed" if any((directory / name).exists() for name in
@@ -662,19 +753,21 @@ def create_server(
         source_kind: Literal["skeleton", "character"] = "skeleton",
         sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
         attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Prepare animation-only Unreal import after Blender reports a verified FBX export.
 
         The editor checks the exact project and matching rig hierarchy before creating an asset.
         Import the rigged character mesh first, then use execute_unreal_handoff.
         """
-        source = handoff_directory(job_id, source_kind, sample_index, attempt)
+        source = handoff_directory(job_id, source_kind, sample_index, attempt, variant_id)
         key = hashlib.sha256(target.model_dump_json().encode()).hexdigest()[:16]
         report = contained_file(source, "blender-report.json")
         output = (source / f"unreal-{key}").resolve()
         if not output.is_relative_to(source.resolve()):
             raise ValueError("Unreal handoff directory escapes its managed source")
-        result = prepare_unreal_files(report, output, target=target)
+        result = prepare_unreal_files(report, output, target=target,
+                                      **({"variant_id": variant_id} if variant_id is not None else {}))
         return result.model_dump()
 
     @mcp.tool(annotations=LOCAL_WRITE)
@@ -683,6 +776,7 @@ def create_server(
         source_kind: Literal["skeleton", "character"] = "skeleton",
         sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
         attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Import a prepared animation into its exact open Unreal project and verify the saved asset.
 
@@ -700,7 +794,7 @@ def create_server(
         engine_path = Path(engine)
         if not engine_path.is_absolute():
             raise ValueError("Unreal engine registration must use an absolute path")
-        source = handoff_directory(job_id, source_kind, sample_index, attempt)
+        source = handoff_directory(job_id, source_kind, sample_index, attempt, variant_id)
         key = hashlib.sha256(target.model_dump_json().encode()).hexdigest()[:16]
         script = contained_file(source, f"unreal-{key}/unreal_handoff.py")
         return execute_handoff(script, engine_path, Path(target.project_file))
@@ -711,9 +805,10 @@ def create_server(
         source_kind: Literal["skeleton", "character"] = "skeleton",
         sample_index: Annotated[int, Field(ge=0, le=3)] = 0,
         attempt: Annotated[int, Field(ge=0, le=99)] = 0,
+        variant_id: SHA | None = None,
     ) -> dict[str, Any]:
         """Read a managed Unreal import's final timing, rig and asset-path verification report."""
-        source = handoff_directory(job_id, source_kind, sample_index, attempt)
+        source = handoff_directory(job_id, source_kind, sample_index, attempt, variant_id)
         key = hashlib.sha256(target.model_dump_json().encode()).hexdigest()[:16]
         directory = (source / f"unreal-{key}").resolve()
         if not directory.is_relative_to(source.resolve()):
@@ -735,7 +830,7 @@ def create_server(
     @mcp.resource("kimodo://jobs/{job_id}", name="Animation job", mime_type="application/json",
                   description="Saved request, lineage, status, progress and completed manifest for a managed job.")
     def job_resource(job_id: str) -> str:
-        return json.dumps(store.get(job_id), indent=2)
+        return json.dumps(workspace.job_details(job_id), indent=2)
 
     @mcp.resource("kimodo://request-schema", name="Generation request schema", mime_type="application/json",
                   description="Complete structured generation contract, including advanced controls and constraints.")
@@ -780,7 +875,9 @@ def create_server(
             "Ask for missing artistic decisions only when necessary.\n"
             "3. Submit the agreed plan through generate_animation or generate_motion; poll get_job until completed. "
             "Use get_job_log on failure and never describe a queued job as a finished animation.\n"
-            "4. Use revise_animation to preserve unedited settings. Use inspect_motion_frames and "
+            "4. For minor corrections, use inspect_motion_rig and get_workflow('correct-motion'); save a complete "
+            "original-relative edit with create_motion_variant, then assess and review the exact variant_id. "
+            "Use revise_animation to preserve unedited settings. Use inspect_motion_frames and "
             "extract_motion_constraints to select actual source poses; validate the new complete request.\n"
             "5. Call inspect_motion, analyze_motion_quality and create_motion_review on each candidate NPZ. "
             "Use assess_motion_candidates with explicit numerical limits and inspect its issue windows; "

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 import secrets
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -63,6 +64,9 @@ _ACTIONS = {
     "export_motion",
     "assess_motion_quality",
     "assess_motion_candidates",
+    "create_motion_variant",
+    "get_motion_variant",
+    "inspect_motion_rig",
 }
 
 
@@ -95,6 +99,7 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
         result = dict(value)
         for source, destination in (
             ("path", "url"),
+            ("absolute_path", "url"),
             ("preview_glb_path", "url"),
             ("diagnostics_path", "diagnostics_url"),
         ):
@@ -102,6 +107,22 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
             if url:
                 result[destination] = url
         return result
+
+    async def motion_preview_data(request):
+        try:
+            pairs = list(request.query_params.multi_items())
+            if (any(key not in {"sample_index", "variant_id"} for key, _ in pairs)
+                    or len({key for key, _ in pairs}) != len(pairs)):
+                raise ValueError("Unexpected or repeated motion selector")
+            index = request.query_params.get("sample_index", "0")
+            if re.fullmatch(r"[0-3]", index) is None:
+                raise ValueError("Sample index must be 0..3")
+            result = await anyio.to_thread.run_sync(lambda: workspace.motion_preview_data(
+                request.path_params["job_id"], int(index), request.query_params.get("variant_id"),
+            ))
+            return JSONResponse(result)
+        except (ValueError, OSError, KeyError, TypeError, RuntimeError) as error:
+            return JSONResponse({"error": redact(str(error))[:2000]}, status_code=400)
 
     async def state(request):
         try:
@@ -203,11 +224,21 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
                     )
                     if path not in {Path(output["absolute_path"]), Path(output["report_path"])}:
                         raise ValueError("File is not the verified motion export or its report")
-                elif path.parent.name.startswith("character-motion_") and path.suffix in {".glb", ".fbx", ".blend"}:
+                elif relative.startswith("variants/"):
+                    output = await anyio.to_thread.run_sync(
+                        lambda: workspace.verified_motion_variant(job_id, relative.split("/")[1])
+                    )
+                    if path not in {Path(output["absolute_path"]), Path(output["report_path"])}:
+                        raise ValueError("File is not the verified motion variant or its report")
+                elif path.parent.name.startswith("character-motion_") and (
+                    path.suffix in {".glb", ".fbx", ".blend"} or path.name == "blender-report.json"
+                ):
                     await anyio.to_thread.run_sync(
                         lambda: workspace.verified_preview(path.with_name("blender-report.json"), store.directory(job_id), job)
                     )
-                elif path.parent.name.startswith("skeleton-motion_") and path.suffix in {".fbx", ".blend"}:
+                elif path.parent.name.startswith("skeleton-motion_") and (
+                    path.suffix in {".fbx", ".blend"} or path.name == "blender-report.json"
+                ):
                     await anyio.to_thread.run_sync(
                         lambda: workspace.verified_skeleton_outputs(
                             path.with_name("blender-report.json"), store.directory(job_id), job
@@ -249,6 +280,7 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
         routes=[
             Route("/api/state", state),
             Route("/api/jobs/{job_id}", job),
+            Route("/api/jobs/{job_id}/motion-preview-data", motion_preview_data),
             Route("/api/actions/{tool}", action, methods=["POST"]),
             Route("/api/character/model.glb", initial_character),
             Route("/api/files/{job_id}/{path:path}", download),

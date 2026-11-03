@@ -17,6 +17,7 @@ from kimodo_mcp.capabilities import (
 )
 from kimodo_mcp.config import Settings
 from kimodo_mcp.handoff import UnrealTarget
+from kimodo_mcp.motion_variants import VariantEdit
 from kimodo_mcp.planning import AnimationBrief, AnimationRevision, PoseReference
 from kimodo_mcp.schemas import GenerateRequest, QualityThresholds
 from kimodo_mcp.server import create_server
@@ -60,6 +61,7 @@ def test_manifest_descriptions_and_annotations_are_copied_not_reinterpreted():
     ("pose_reference", PoseReference, {"job_id": "0" * 32, "frame": 0}),
     ("quality_thresholds", QualityThresholds, {"contact_slide_m_s": 0.08}),
     ("quality_policy", QualityPolicy, {"checks": [{"metric": "bone_length_drift", "max_value": 0.005}]}),
+    ("variant_edit", VariantEdit, {"start_frame": 2, "end_frame_exclusive": 30}),
     ("unreal_target", UnrealTarget, None),
 ])
 def test_schemas_are_complete_current_models_and_examples_validate(name, model, example, tmp_path):
@@ -88,14 +90,14 @@ def _example_references(tmp_path):
                   "source_kind": "character", "source_frame": 10, "frame_indices": [0, 10, 20],
                   "offset_frames": 0, "space": "world", "target": _target(tmp_path),
                   "format": "bvh", "bvh_standard_tpose": True, "amass_z_up": True,
-                  "mujoco_rest_zero": False,
+                  "mujoco_rest_zero": False, "edit": {"start_frame": 0, "end_frame_exclusive": 30},
                   "candidates": [{"job_id": "0" * 32, "sample_index": 0}],
                   "policy": {"checks": [{"metric": "bone_length_drift", "max_value": 0.005}]},
                   "brief": {"description": "A person waves.", "duration_seconds": 2.0},
                   "revision": {"description": "A person makes a slower wave."},
                   "start_from": {"job_id": "0" * 32, "sample_index": 0, "frame": 10}},
         "steps": {"submit": {"id": "2" * 32}, "retry": {"id": "3" * 32}, "build": {"attempt": 0},
-                  "export": {"export_id": "a" * 64},
+                  "export": {"export_id": "a" * 64}, "variant": {"variant_id": "b" * 64},
                   "job": {"request": {"segments": [{"text": "A person waves.", "duration": 2.0}]}}},
     }
 

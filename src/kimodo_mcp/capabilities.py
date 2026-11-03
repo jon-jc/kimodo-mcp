@@ -12,16 +12,17 @@ from typing import Any, Literal, get_args
 from .assessment import QualityPolicy
 from .catalog import UPSTREAM_REVISION, list_models
 from .handoff import UnrealTarget
+from .motion_variants import VariantEdit
 from .planning import QUALITY_STEPS, AnimationBrief, AnimationRevision, PoseReference
 from .schemas import GenerateRequest, QualityThresholds
 
 WorkflowName = Literal[
     "generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-    "export-character", "import-unreal", "recover-job", "assess-candidates",
+    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion",
 ]
 SchemaName = Literal[
     "generate_request", "animation_brief", "animation_revision", "pose_reference",
-    "quality_thresholds", "unreal_target", "quality_policy",
+    "quality_thresholds", "unreal_target", "quality_policy", "variant_edit",
 ]
 WORKFLOW_IDS = get_args(WorkflowName)
 SCHEMA_IDS = get_args(SchemaName)
@@ -33,6 +34,7 @@ _SCHEMAS = {
     "pose_reference": PoseReference,
     "quality_thresholds": QualityThresholds,
     "quality_policy": QualityPolicy,
+    "variant_edit": VariantEdit,
     "unreal_target": UnrealTarget,
 }
 
@@ -54,6 +56,8 @@ _GROUPS = {
          "assess_motion_quality", "assess_motion_candidates"),
     ),
     "outputs": ("Export and locate verified outputs", ("get_artifact", "list_job_outputs", "export_motion")),
+    "corrections": ("Inspect rigs and save precise motion corrections",
+                    ("inspect_motion_rig", "create_motion_variant", "get_motion_variant")),
     "blender": (
         "Export skeletons and the registered fitted character",
         ("prepare_blender_handoff", "prepare_character_handoff", "execute_blender_handoff",
@@ -95,6 +99,43 @@ def _handoff_args(source_kind: str) -> tuple[dict, dict]:
 
 
 _RECIPES = {
+    "correct-motion": {
+        "title": "Inspect a rig and correct selected joints without new generation",
+        "inputs": {"job_id": "Completed original job id.", "sample_index": "Original sample index, default 0.",
+                   "name": "Matching native sample name, for example motion_00.npz.",
+                   "edit": "Complete variant_edit relative to the original, including retained earlier changes.",
+                   "policy": "Explicit quality_policy used before and after the correction."},
+        "requirements": ["Original source is a complete canonical SOMA30 or SOMA77 archive.",
+                         "Inspect the problem in context and choose precise named joints and frame windows."],
+        "steps": [
+            _completed_job(),
+            _step("contract", "get_input_schema", "Read radians, frame-window, taper and placement controls.",
+                  arguments={"schema_name": "variant_edit"}),
+            _step("rig", "inspect_motion_rig", "Read full hierarchy, body groups, local axes and edit eligibility.",
+                  arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index"}),
+            _step("before", "assess_motion_quality", "Keep the original source and policy hashes and problem windows.",
+                  arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index", "policy": "input.policy"}),
+            _step("variant", "create_motion_variant", "An immutable corrected NPZ and verified edit receipt are saved.",
+                  arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index", "edit": "input.edit"},
+                  on_failure="Inspect the error; do not overwrite source or blindly retry an incomplete saved variant."),
+            _step("after", "assess_motion_quality", "Recheck the selected variant under the identical policy.",
+                  arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index",
+                                  "variant_id": "steps.variant.variant_id", "policy": "input.policy"}),
+            _step("review", "create_motion_review", "Inspect actual corrected movement and neighboring joints.",
+                  arguments_from={"job_id": "input.job_id", "variant_id": "steps.variant.variant_id",
+                                  "name": "input.name"}),
+        ],
+        "completion": "A verified saved correction, reviewed in context and on the target character before export.",
+        "notes": [
+            "All edit windows use original zero-based frames with an exclusive end; inspection uses selected-clip frames.",
+            "Re-edit with the full combined edit against the original; variants are never chained or overwritten.",
+            "Effective joint corrections invalidate predicted contacts; missing evidence is not successful contact repair.",
+            "Pass variant_id through inspection, constraints, comparison, assessment, export and every editor handoff.",
+            "For original A versus trimmed variant B, use offset_frames=-edit.start_frame; B frame is A+offset.",
+            "Export the variant to BVH and pass both variant_id and export_id to prepare_blender_handoff.",
+            "No anatomical solver, rest-bone changes, skin-weight edits, automatic IK, resampling or contact locking runs.",
+        ],
+    },
     "assess-candidates": {
         "title": "Assess takes against an action-specific numerical policy",
         "inputs": {"candidates": "One to eight distinct completed job/sample references.",
@@ -446,6 +487,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
                    "constrained_frame_entries": 512, "inspection_frames": 16,
                    "inspection_named_joints": 32, "inspection_joint_poses": 2048,
                    "inspection_joint_poses_with_rotations": 256,
+                   "variant_adjusted_joints": 16, "variant_blend_frames": [0, 30],
                    "extracted_constraint_frames": 128, "sample_index": [0, 3], "handoff_attempt": [0, 99]},
         "defaults": {
             "natural_brief": {"duration_seconds": 4, "model": "kimodo-soma-rp-v1.2", "candidates": 1,
@@ -482,7 +524,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
         "unsupported": [
             "Mesh generation or arbitrary character auto-rigging; the supplied character fit is asset-specific.",
             "Facial animation, independent finger animation, cloth/hair physics or collision simulation in the fitted-character workflow.",
-            "Automatic cross-rig retargeting, seamless stitching, velocity matching, arbitrary resampling or motion repair.",
+            "Automatic cross-rig retargeting, seamless stitching, velocity matching, arbitrary resampling or automatic contact repair.",
             "Initial Unreal skeletal-mesh import through this server; use the editor's import tools first.",
             "Arbitrary external file import/conversion, training, benchmark execution, video/audio rendering; compatible completed managed NPZ export is supported.",
             "Arbitrary code execution or file read/write, dependency installation or worker/editor startup; explicit Unreal target paths are a bounded import exception.",
