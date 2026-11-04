@@ -2,6 +2,27 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-03 — Direct skeleton manipulation and reliable editing drafts
+
+### Added
+
+- **Edit skeleton** opens the source rig and desktop focus layout. Screen-space joint picking, visible translation/rotation handles, planar root movement and parent-bone aiming make small corrections directly manipulable. Rotation stays local and bone lengths remain fixed; this is not multi-joint IK.
+- Responsive one-frame forward kinematics during dragging, exact backend verification on release, and a clearly marked unsaved-pose preview. Each drag stages one undoable edit; saving creates the playable immutable version. Seeking/playback clears the pose preview without discarding the draft.
+- Explicit correction-window controls around the current frame. New endpoint edits span the retained clip to avoid a zero-fade cutoff inside it; existing authored windows remain unchanged. Exports and pose anchors distinguish saved motion from the displayed unsaved pose.
+- Sequence undo/redo with 50 states, grouped field typing, stable card identities, keyboard shortcuts, and focus restoration. Invalid collapsed action fields open and receive focus before preview/save/generate.
+
+### Fixed
+
+- Pending joint and placement fields no longer overwrite each other when staging. Fractional drag values remain valid numeric input. Delayed saves and previews cannot replace newer selections, edits or playback.
+- Pointer cancellation restores orbit and discards only the incomplete drag. Hidden/clipped joints cannot be picked. The fitted-character bone overlay now has a separate clearly named source-editing entry point.
+- Rig-focus grid rows retain their content height, so candidates and diagnostics cannot overlap the viewport or playback. Its controls scroll independently; direct-edit controls wrap on narrow screens.
+
+### Validation and scope
+
+- 63 frontend tests cover FK, bone preservation, original-frame weights, placement, picking, cancellation, draft races, field preservation, sequence history and validation; production build passed.
+- Live Studio checks clicked a source joint, dragged root/arm handles, rotated an arm, undid a drag and saved a two-joint version. Separate checks confirmed pending form preservation and desktop/narrow-screen layout. Exact client/backend FK agreement on an existing motion was within 1.3e-7 meters for positions and 2.8e-7 for rotation components.
+- Added an actual editor screenshot and detailed workflow documentation. Validation used existing motions; no inference worker, model generation, Blender execution or Unreal import was run. Test corrections demonstrate edit mechanics, not accepted production animation quality.
+
 ## 2026-11-03 — Exact correction previews and preserved partial revisions
 
 ### Added

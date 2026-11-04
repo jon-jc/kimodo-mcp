@@ -128,6 +128,8 @@ Planning preserves the text as written. Kimodo interprets the action during gene
 
 Enable **Sequence of timed actions** to author two to eight beats. Each action card contains a complete description and a requested duration of 0.2–10 seconds. **Sequence notes · not a motion prompt** records your authoring context; those notes are not silently prepended to the action prompts.
 
+**Undo actions** and **Redo actions** restore text, timing, ordering and deleted cards, with up to 50 history states. Typing in one field is grouped until focus changes; structural edits create separate history entries. Ctrl/Cmd+Z undoes inside the composer; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes. Loading a plan or applying a starter begins a new action-editing session. Preview, save and generation open the first invalid collapsed action and focus its required field.
+
 1. Start with your own actions or select an editable starting point: **Approach → greet → settle**, **Crouch → jump → land**, or **Turn → walk → stop**. **Apply starter · replace actions** replaces the current cards, so use it deliberately.
 2. Click a card summary or its numbered timeline segment to edit that action. Keep its starting pose, pace, direction and any persistent object clear.
 3. Use the up/down controls to reorder a card, duplicate it to create a related action, or remove it. **+ Add action** inserts a new blank card. These controls preserve each remaining card's text and duration.
@@ -410,3 +412,20 @@ The browser resource policy allows local scripts/styles and embedded GLB image r
 Earlier live integration validation used actual API responses and the real GLB: textured rendering, camera/timeline controls, preserved revisions, pose-anchor planning, timed beats, diagnostics, comparison, downloaded NPZ checksum, worker logs, Blender receipt reuse, and a saved Unreal import. Desktop and narrow layouts were visually inspected with no browser console or page errors.
 
 The publication checks reused a completed motion and did not submit fresh inference under insufficient available memory. The separately verified queue/cancel path stopped before model inference. The sequence-composer screenshots illustrate authoring and review of existing outputs; they are not evidence of a newly generated multi-beat performance or a new editor execution. Neither a valid plan nor a connected worker is evidence that a new animation has finished.
+
+## Direct viewport corrections
+
+![Source rig with direct local rotation handles](images/studio-direct-rig-editing.jpg)
+
+1. Select a completed animation and click **Edit skeleton**. This opens **Review & fix**, switches to **Source rig**, and opens the two-column rig focus layout on desktop. The fitted character's **Show bones** overlay is an inspection aid; the source rig contains the editable motion joints.
+2. Pause at a problem frame, then click a joint in the viewport or find it by name. Picking uses a screen-space tolerance so small joints remain selectable. Search retains the surrounding skeleton for context.
+3. Choose **Move joint** or **Rotate joint**. Move aims the selected joint by rotating its parent bone; it preserves bone length and does not solve a multi-joint chain. Rotate edits the selected joint's local XYZ correction. Root movement uses X, Z or the ground-plane square; heading remains available under clip placement.
+4. Drag a colored handle. Orbit is suspended while dragging. Release to stage one undoable edit. Interrupted pointer capture discards the unfinished drag and restores orbit. A local preview responds immediately; the backend verifies the released pose with the exact math used for saving.
+5. Read the displayed original-frame window and blend. New interior edits use a window around the playhead and a smoothstep fade. At the first or last retained frame, a new edit defaults to the full retained clip with no fade, avoiding a hard cutoff inside the clip while making the endpoint editable. Existing windows are preserved; **Edit around this frame** deliberately replaces the selected correction's window. Inspect the whole affected interval before saving.
+6. **Preview draft at this frame** checks a paused pose; **Show saved motion**, seeking or playback returns to the saved clip. The gold badge identifies an unsaved preview. It is a single-frame source preview, not fitted-character deformation or playable unsaved motion.
+7. Use **Undo draft**, **Redo draft** or numeric fields to refine the result. Pending trim/placement values survive staging a joint; pending joint values survive staging placement. Handles pause while fields contain an unstaged change. Fractional values produced by dragging remain valid numeric input.
+8. **Save & inspect new version** writes an immutable original-relative clip. If you edit or switch selections while saving, the completed older snapshot remains available without replacing your newer draft. Build a fitted-character preview separately when ready to inspect deformation.
+
+Exports always use the selected saved version. An unsaved displayed pose cannot become a generation starting constraint until saved. Rig focus gives its control column independent scrolling and keeps subsequent candidate/review sections below the viewport; narrow screens stack the editor. Contact labels are invalidated by effective joint edits. These controls do not guarantee anatomical realism, planted feet or a seamless transition.
+
+Agents perform the same exact preview and save operations with `preview_motion_variant`, `revise_motion_variant` and `create_motion_variant`; see [correction API](correction-api.md). The browser's handle coordinates are converted to the same bounded original-relative edit schema, rather than a separate correction format.

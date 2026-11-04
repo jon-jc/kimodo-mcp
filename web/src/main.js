@@ -63,14 +63,17 @@ try {
 
 try {
   rigPanel = new RigPanel({
+    getSelectionEpoch: () => state.selectionEpoch,
+    onDraftPreviewChange: () => enableActions(),
     onTime: (time, total, playing) => showTime('source', time, total, playing),
     onLoaded: info => { if (state.viewerMode === 'source') $('asset-label').textContent = `${info.bones} source joints · exact frames`; enableActions(); },
     onError: error => { notice(error.message, true); enableActions(); },
     onVariant: async (result, snapshot) => {
       const job = state.jobs.find(item => jobId(item) === jobId(snapshot.job));
       if (job) { job.variants ??= []; if (!job.variants.some(item => item.variant_id === result.variant_id)) job.variants.push(result); }
-      if (currentKey() === snapshot.key) { state.variant = result.variant_id; state.selectionSignature = ''; $('start-pose').checked = false; setViewerMode('source'); await renderSelection(); }
-      notice('New motion version saved. Inspect its joints and contact diagnostics before building a fitted-character preview.');
+      const adopt = snapshot.should_select !== false && snapshot.selection_epoch === state.selectionEpoch && currentKey() === snapshot.key;
+      if (adopt) { state.selectionEpoch++; state.variant = result.variant_id; state.selectionSignature = ''; $('start-pose').checked = false; setViewerMode('source'); await renderSelection(); }
+      notice(adopt ? 'New motion version saved. Inspect its joints and contact diagnostics before building a fitted-character preview.' : 'The earlier correction snapshot was saved. Your current selection and newer draft remain in place.');
       await refresh();
     },
   });
@@ -140,6 +143,7 @@ for (const step of WORKFLOW_STEPS) {
 $('rig-focus').addEventListener('click', () => { setWorkflow('review'); setRigFocus(!state.focusRig); });
 window.addEventListener('resize', () => { if (state.focusRig && window.innerWidth <= 1000) setRigFocus(false); $('rig-focus').disabled = window.innerWidth <= 1000; });
 $('mode-source').addEventListener('click', () => { setWorkflow('review'); setViewerMode('source'); });
+$('edit-skeleton').addEventListener('click', () => { setWorkflow('review'); setViewerMode('source'); setRigFocus(window.innerWidth > 1000); });
 $('mode-character').addEventListener('click', () => setViewerMode('character'));
 $('motion-version').addEventListener('change', () => { state.selectionEpoch++; state.variant = $('motion-version').value || null; state.selectionSignature = ''; $('start-pose').checked = false; renderSelection(); });
 $('play').addEventListener('click', () => activeViewer()?.togglePlay());
@@ -261,7 +265,11 @@ async function previewCurrentPlan() {
   if ($('notice').classList.contains('error')) $('notice').hidden = true;
   displayPlan(result); renderSavedState(); return result;
 }
-$('plan').addEventListener('click', () => withBusy($('plan'), async () => { if ($('create-form').reportValidity()) await previewCurrentPlan(); }));
+function validCreateForm() {
+  if ($('sequence-mode').checked && !composer.reportValidity()) return false;
+  return $('create-form').reportValidity();
+}
+$('plan').addEventListener('click', () => withBusy($('plan'), async () => { if (validCreateForm()) await previewCurrentPlan(); }));
 
 async function refreshPlanLibrary(preferredId = null, requestedOffset = state.libraryOffset) {
   const offset = preferredId ? 0 : requestedOffset;
@@ -310,7 +318,7 @@ $('save-plan').addEventListener('click', () => withBusy($('save-plan'), async ()
   if (state.savedPlan && !savedDirty()) { notice('This exact plan is already saved. Edit it to create a new version.'); return; }
   const metadata = planMetadata(), { title } = metadata;
   if (!title.trim() || title.length > 160) { $('saved-plan-title').focus(); throw new Error('Name the saved plan using 1 to 160 characters.'); }
-  if (!$('create-form').reportValidity()) return;
+  if (!validCreateForm()) return;
   const parent = state.savedPlan?.plan_id ?? null;
   const compiled = state.planGate.current(draftInput()) ?? await previewCurrentPlan(); if (!compiled) return;
   const snapshot = draftInput();
@@ -338,6 +346,7 @@ function selectSubmittedJob(result, snapshot) {
 
 $('create-form').addEventListener('submit', event => {
   event.preventDefault();
+  if (!validCreateForm()) return;
   withBusy($('generate'), async () => {
     const selection = submissionSelection();
     if (state.busy.has('load-plan')) throw new Error('Wait for the selected saved plan to finish loading.');
@@ -361,13 +370,20 @@ $('create-form').addEventListener('submit', event => {
 });
 
 function enableActions() {
+  $('edit-skeleton').disabled = !completed();
   for (const id of ['review', 'compare', 'build-preview', 'send-blender', 'send-unreal', 'export-motion']) $(id).disabled = !completed() || !state.connected || state.busy.has(id);
   for (const id of ['generate', 'plan']) $(id).disabled = !state.connected || state.busy.has(id);
   const job = current(), preview = selectedPreview(job, state.sample, state.variant);
   const matchingView = state.viewerMode === 'source' ? rigPanel?.loadedKey === currentKey() : state.previewLoaded && safeLocalUrl(preview?.url) === state.previewUrl;
-  const canAnchor = completed() && !state.revision && !state.savedPlan && matchingView && ['somaskel30', 'somaskel77'].includes(job?.manifest?.skeleton);
+  const unsavedPose = state.viewerMode === 'source' && rigPanel?.hasDraftPreview;
+  const canAnchor = completed() && !state.revision && !state.savedPlan && matchingView && !unsavedPose && ['somaskel30', 'somaskel77'].includes(job?.manifest?.skeleton);
   $('start-pose').disabled = !canAnchor;
   if (!canAnchor) $('start-pose').checked = false;
+  $('saved-export-note').textContent = unsavedPose
+    ? 'An unsaved pose is shown. Exports use the selected saved motion. Save and inspect the draft first to export your changes.'
+    : 'Exports use the selected saved motion version. Staged corrections must be saved first.';
+  if (unsavedPose) $('anchor-note').textContent = 'Save and inspect this correction before using its pose as a starting constraint.';
+  else if (!$('start-pose').checked) $('anchor-note').textContent = canAnchor ? 'Use the selected saved motion at the current frame as a starting pose.' : 'Select a completed SOMA character motion to use its saved pose.';
   if (state.planGate.result) { try { if (!state.planGate.current(draftInput())) invalidatePlan(); } catch { invalidatePlan(); } }
   renderSavedState();
   updateWorkflowHint();

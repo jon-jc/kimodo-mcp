@@ -163,11 +163,11 @@ export function placementFromControls(values, edit, originalFrames) {
 
 export class DraftHistory {
   constructor(edit) { this.reset(edit); }
-  reset(edit) { this.entries = [clone(edit)]; this.index = 0; }
+  reset(edit) { this.entries = [clone(edit)]; this.index = 0; this.revision = (this.revision ?? -1) + 1; }
   get value() { return clone(this.entries[this.index]); }
   get canUndo() { return this.index > 0; }
   get canRedo() { return this.index < this.entries.length - 1; }
-  push(edit) { if (JSON.stringify(edit) === JSON.stringify(this.entries[this.index])) return; this.entries = this.entries.slice(0, this.index + 1); this.entries.push(clone(edit)); if (this.entries.length > 50) this.entries.shift(); this.index = this.entries.length - 1; }
-  undo() { if (this.canUndo) this.index--; return this.value; }
-  redo() { if (this.canRedo) this.index++; return this.value; }
+  push(edit) { if (JSON.stringify(edit) === JSON.stringify(this.entries[this.index])) return; this.entries = this.entries.slice(0, this.index + 1); this.entries.push(clone(edit)); if (this.entries.length > 50) this.entries.shift(); this.index = this.entries.length - 1; this.revision++; }
+  undo() { if (this.canUndo) { this.index--; this.revision++; } return this.value; }
+  redo() { if (this.canRedo) { this.index++; this.revision++; } return this.value; }
 }

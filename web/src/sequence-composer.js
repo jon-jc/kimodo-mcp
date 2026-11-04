@@ -1,29 +1,90 @@
-import { duplicateBeat, makeBeats, moveBeat, removeBeat, requestBeats, sequenceTimeline } from './sequence.js';
+import { duplicateBeat, firstBeatIssue, makeBeats, moveBeat, removeBeat, requestBeats, SequenceHistory, sequenceTimeline } from './sequence.js';
 
 const el = (tag, text = '', className = '') => { const node = document.createElement(tag); node.textContent = text; node.className = className; return node; };
 
 export class SequenceComposer {
   constructor({ container, timeline, total, onChange, onError }) {
     Object.assign(this, { container, timeline, total, onChange, onError });
-    this.beats = []; this.nodes = new Map(); this.selected = null; this.enabled = false; this.plan = null;
+    this.beats = []; this.nodes = new Map(); this.selected = null; this.field = 'text'; this.enabled = false; this.plan = null;
+    this.history = new SequenceHistory(); this.editSession = null; this.editSerial = 0;
+    this.toolbar = el('div', '', 'sequence-history'); this.toolbar.setAttribute('role', 'group'); this.toolbar.setAttribute('aria-label', 'Sequence edit history');
+    this.undoButton = el('button', '↶ Undo', 'small-button'); this.undoButton.type = 'button'; this.undoButton.id = 'sequence-undo';
+    this.redoButton = el('button', '↷ Redo', 'small-button'); this.redoButton.type = 'button'; this.redoButton.id = 'sequence-redo';
+    this.undoButton.setAttribute('aria-label', 'Undo sequence edit'); this.redoButton.setAttribute('aria-label', 'Redo sequence edit');
+    this.undoButton.title = 'Undo the last action edit (Ctrl/Cmd+Z)'; this.redoButton.title = 'Redo the last action edit (Ctrl/Cmd+Shift+Z)';
+    this.undoButton.addEventListener('click', () => this.undo()); this.redoButton.addEventListener('click', () => this.redo());
+    const help = el('span', 'Typing is grouped until you leave a field.', 'sequence-history-help');
+    this.toolbar.append(this.undoButton, this.redoButton, help); this.timeline.before(this.toolbar); this.renderHistory();
+    const keyboard = event => {
+      if (!this.enabled || event.altKey || event.isComposing || !(event.ctrlKey || event.metaKey)) return;
+      const key = event.key.toLowerCase();
+      if (key !== 'z' && key !== 'y') return;
+      event.preventDefault(); if (key === 'y' || event.shiftKey) this.redo(); else this.undo();
+    };
+    this.container.addEventListener('keydown', keyboard); this.toolbar.addEventListener('keydown', keyboard);
+    this.container.addEventListener('beforeinput', event => {
+      if (!this.enabled || !['historyUndo', 'historyRedo'].includes(event.inputType)) return;
+      event.preventDefault(); if (event.inputType === 'historyUndo') this.undo(); else this.redo();
+    });
   }
-  replace(values) { this.beats = makeBeats(values); this.selected = this.beats[0].id; this.plan = null; this.render(); this.onChange(); }
+  snapshot() { return structuredClone({ beats: this.beats, selected: this.selected, field: this.field }); }
+  commitEditing() { this.editSession = null; this.history.commit(); }
+  beginEditing(id, field) { this.commitEditing(); this.field = field; this.history.focus(id, field); this.editSession = { id, field, key: ++this.editSerial }; }
+  replace(values) {
+    // Loading or applying a starter establishes a new editing session, including
+    // the surrounding title/notes managed by the parent form.
+    this.commitEditing(); this.beats = makeBeats(values); this.selected = this.beats[0].id; this.field = 'text';
+    this.history.reset(this.snapshot()); this.plan = null; this.render(); this.onChange();
+  }
   getBeats() { return requestBeats(this.beats); }
-  setEnabled(value) { this.enabled = value; this.render(); }
+  reportValidity() {
+    if (!this.enabled) return true;
+    const issue = firstBeatIssue(this.beats); if (!issue) return true;
+    this.focus(issue.id, issue.field);
+    const node = this.nodes.get(issue.id), input = issue.field === 'text' ? node.textarea : node.input;
+    input.setCustomValidity(issue.message); input.setAttribute('aria-invalid', 'true'); input.reportValidity();
+    this.onError(new Error(issue.message)); return false;
+  }
+  setEnabled(value) { this.commitEditing(); this.enabled = value; this.render(); }
   setPlan(plan) { this.plan = plan; this.renderTimeline(); }
   changed() { this.plan = null; this.renderTimeline(); this.onChange(); }
-  add() {
-    if (this.beats.length >= 8) return;
-    const beat = { id: crypto.randomUUID(), text: '', duration: 2 };
-    this.beats.push(beat); this.selected = beat.id; this.changed(); this.render(); this.focus(beat.id);
+  renderHistory() { this.undoButton.disabled = !this.enabled || !this.history.canUndo; this.redoButton.disabled = !this.enabled || !this.history.canRedo; }
+  restore(snapshot) {
+    this.beats = snapshot.beats; this.selected = snapshot.selected; this.field = snapshot.field;
+    this.changed(); this.focus(this.selected, this.field);
   }
-  focus(id) { this.selected = id; this.render(); this.nodes.get(id)?.textarea.focus(); }
+  undo() { if (!this.enabled) return; this.commitEditing(); const snapshot = this.history.undo(); if (snapshot) this.restore(snapshot); }
+  redo() { if (!this.enabled) return; this.commitEditing(); const snapshot = this.history.redo(); if (snapshot) this.restore(snapshot); }
+  edit(id, field, value) {
+    if (!this.editSession || this.editSession.id !== id || this.editSession.field !== field) this.beginEditing(id, field);
+    const next = this.snapshot(), beat = next.beats.find(item => item.id === id); beat[field] = value; next.selected = id; next.field = field;
+    this.history.apply(next, this.editSession.key);
+    this.beats.find(item => item.id === id)[field] = value;
+    const node = this.nodes.get(id), input = field === 'text' ? node.textarea : node.input;
+    input.setCustomValidity(''); input.removeAttribute('aria-invalid'); node.summary.textContent = this.beats.find(item => item.id === id).text.trim() || 'Describe this action…';
+    this.changed();
+  }
+  add() {
+    if (!this.enabled || this.beats.length >= 8) return;
+    this.commitEditing();
+    const beat = { id: crypto.randomUUID(), text: '', duration: 2 };
+    this.beats.push(beat); this.selected = beat.id; this.field = 'text'; this.history.apply(this.snapshot()); this.changed(); this.focus(beat.id);
+  }
+  focus(id, field = 'text') {
+    this.commitEditing(); this.selected = this.beats.some(item => item.id === id) ? id : this.beats[0]?.id;
+    this.field = field; this.history.focus(this.selected, field); this.render();
+    const node = this.nodes.get(this.selected); (field === 'duration' ? node?.input : node?.textarea)?.focus();
+  }
   operate(id, operation) {
+    if (!this.enabled) return;
     try {
+      this.commitEditing();
       const index = this.beats.findIndex(item => item.id === id);
       if (operation === 'up' || operation === 'down') this.beats = moveBeat(this.beats, id, operation === 'up' ? -1 : 1);
       else if (operation === 'duplicate') { this.beats = duplicateBeat(this.beats, id); this.selected = this.beats[index + 1].id; }
-      else { this.beats = removeBeat(this.beats, id); if (this.selected === id) this.selected = this.beats[Math.min(index, this.beats.length - 1)].id; }
+      else if (operation === 'remove') { this.beats = removeBeat(this.beats, id); if (this.selected === id) this.selected = this.beats[Math.min(index, this.beats.length - 1)].id; }
+      else throw new Error('Choose a sequence action operation.');
+      this.field = 'text'; this.history.apply(this.snapshot());
       this.changed(); this.render();
       const target = this.nodes.get(operation === 'duplicate' ? this.selected : operation === 'remove' ? this.selected : id);
       if (operation === 'up' || operation === 'down') (target.buttons[operation].disabled ? target.editor.hidden ? target.summary : target.textarea : target.buttons[operation]).focus();
@@ -43,8 +104,11 @@ export class SequenceComposer {
     textarea.placeholder = 'Describe this action and its starting pose.';
     const timing = el('label', 'Requested seconds'), input = el('input'); input.type = 'number'; input.min = '0.2'; input.max = '10'; input.step = 'any'; input.required = true; input.value = beat.duration;
     const exact = el('p', '', 'beat-exact'); timing.append(input); editor.append(textarea, timing, exact); row.append(head, summary, editor);
-    textarea.addEventListener('input', () => { beat.text = textarea.value; summary.textContent = beat.text.trim() || 'Describe this action…'; this.changed(); });
-    input.addEventListener('input', () => { beat.duration = input.value; this.changed(); });
+    for (const [field, control] of [['text', textarea], ['duration', input]]) {
+      control.addEventListener('focus', () => this.beginEditing(beat.id, field));
+      control.addEventListener('blur', () => this.commitEditing());
+      control.addEventListener('input', () => this.edit(beat.id, field, control.value));
+    }
     return { row, title, summary, editor, textarea, input, exact, buttons };
   }
   render() {
@@ -61,6 +125,7 @@ export class SequenceComposer {
       if (String(node.input.value) !== String(beat.duration)) node.input.value = beat.duration;
       const selected = beat.id === this.selected; node.editor.hidden = !selected; node.summary.setAttribute('aria-expanded', String(selected)); node.row.classList.toggle('active', selected);
       node.textarea.disabled = node.input.disabled = !this.enabled || !selected;
+      for (const control of [node.textarea, node.input]) { control.setCustomValidity(''); control.removeAttribute('aria-invalid'); }
       node.textarea.setAttribute('aria-label', `Action ${index + 1} description`); node.input.setAttribute('aria-label', `Action ${index + 1} requested seconds`);
       for (const [operation, button] of Object.entries(node.buttons)) {
         button.setAttribute('aria-label', `${{ up: 'Move up', down: 'Move down', duplicate: 'Duplicate', remove: 'Remove' }[operation]} action ${index + 1}`);
@@ -72,6 +137,7 @@ export class SequenceComposer {
     this.renderTimeline();
   }
   renderTimeline() {
+    this.renderHistory();
     if (!this.beats.length) { this.timeline.replaceChildren(); this.total.textContent = ''; return; }
     let timing;
     try { timing = sequenceTimeline(this.beats, this.plan); } catch (error) { this.plan = null; timing = sequenceTimeline(this.beats); this.onError(error); }

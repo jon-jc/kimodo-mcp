@@ -18,6 +18,7 @@
 }
 
 /* A sequence's action cards are the primary authoring surface. */
+.sequence-history{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:10px 0 5px}.sequence-history .small-button{min-height:32px}.sequence-history-help{flex:1 1 160px;font-size:9px;line-height:1.4;color:var(--muted)}.beat-editor [aria-invalid="true"]{border-color:#d58b87}
 .sequence-authoring .create-panel > h1,
 .sequence-authoring .create-panel > .intro,
 .sequence-authoring .create-panel .presets { display: none; }

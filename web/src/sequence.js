@@ -45,11 +45,47 @@ export function removeBeat(beats, id) {
   return beats.filter(item => item.id !== id).map(copy);
 }
 export function requestBeats(beats) {
-  return beats.map((item, index) => {
-    const text = item.text.trim(), duration = typeof item.duration === 'number' ? item.duration : item.duration.trim() ? Number(item.duration) : NaN;
-    if (!text || text.length > 2000 || !Number.isFinite(duration) || duration < 0.2 || duration > 10) throw new Error(`Action ${index + 1} needs a description and a duration from 0.2 to 10 seconds.`);
-    return { text, duration };
-  });
+  const issue = firstBeatIssue(beats);
+  if (issue) throw Object.assign(new Error(issue.message), { beatIndex: issue.index, field: issue.field });
+  return beats.map(item => ({ text: item.text.trim(), duration: Number(item.duration) }));
+}
+
+export function firstBeatIssue(beats) {
+  for (const [index, item] of beats.entries()) {
+    const text = String(item.text ?? '').trim();
+    if (!text || text.length > 2000 || !/[\p{L}\p{N}]/u.test(text)) return { index, id: item.id, field: 'text', message: `Action ${index + 1} needs a description with a letter or number, up to 2000 characters.` };
+    const raw = item.duration, duration = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() ? Number(raw) : NaN;
+    if (!Number.isFinite(duration) || duration < 0.2 || duration > 10) return { index, id: item.id, field: 'duration', message: `Action ${index + 1} needs a duration from 0.2 to 10 seconds.` };
+  }
+  return null;
+}
+
+export class SequenceHistory {
+  constructor(initial = { beats: [], selected: null, field: 'text' }, limit = 50) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new Error('Choose a sequence history limit from 1 to 100.');
+    this.limit = limit; this.reset(initial);
+  }
+  reset(value) { this.present = copy(value); this.past = []; this.future = []; this.group = null; }
+  commit() { this.group = null; }
+  focus(selected, field = 'text') { this.present.selected = selected; this.present.field = field; }
+  get canUndo() { return this.past.length > 0; }
+  get canRedo() { return this.future.length > 0; }
+  apply(value, group = null) {
+    if (key(value.beats) === key(this.present.beats)) { this.present = copy(value); return false; }
+    if (group === null || this.group !== group) {
+      this.past.push(copy(this.present));
+      if (this.past.length > this.limit) this.past.shift();
+    }
+    this.present = copy(value); this.future = []; this.group = group; return true;
+  }
+  undo() {
+    this.commit(); if (!this.canUndo) return null;
+    this.future.push(copy(this.present)); this.present = this.past.pop(); return copy(this.present);
+  }
+  redo() {
+    this.commit(); if (!this.canRedo) return null;
+    this.past.push(copy(this.present)); this.present = this.future.pop(); return copy(this.present);
+  }
 }
 
 export function sequenceTimeline(beats, plan = null) {
