@@ -10,6 +10,7 @@ from copy import deepcopy
 from typing import Any, Literal, get_args
 
 from .assessment import QualityPolicy
+from .capture_retarget import CaptureRetargetRequest
 from .catalog import UPSTREAM_REVISION, list_models
 from .freemocap import LIMITATIONS as FREEMOCAP_LIMITATIONS
 from .freemocap import UPSTREAM_REVISION as FREEMOCAP_REVISION
@@ -25,11 +26,11 @@ from .video_mocap import VideoMocapRequest
 
 WorkflowName = Literal[
     "generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans", "video-mocap", "freemocap", "resume-motion",
+    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans", "video-mocap", "freemocap", "resume-motion", "capture-character", "native-workspace",
 ]
 SchemaName = Literal[
     "generate_request", "animation_brief", "animation_revision", "pose_reference",
-    "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision", "video_mocap_request", "freemocap_request",
+    "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision", "video_mocap_request", "freemocap_request", "capture_retarget_request",
 ]
 WORKFLOW_IDS = get_args(WorkflowName)
 SCHEMA_IDS = get_args(SchemaName)
@@ -46,9 +47,17 @@ _SCHEMAS = {
     "unreal_target": UnrealTarget,
     "video_mocap_request": VideoMocapRequest,
     "freemocap_request": FreeMocapRequest,
+    "capture_retarget_request": CaptureRetargetRequest,
 }
 
 _GROUPS = {
+    "native_workspace": ("Open all original native Kimodo UI capabilities in a separate local session",
+                         ("get_native_workspace", "start_native_workspace", "stop_native_workspace")),
+    "capture_character": ("Clean up and retarget verified capture exports onto the registered character",
+                          ("list_freemocap_character_handoffs", "inspect_freemocap_retarget_source",
+                           "prepare_freemocap_character", "execute_freemocap_character", "get_freemocap_character",
+                           "get_freemocap_character_artifact", "prepare_freemocap_unreal",
+                           "execute_freemocap_unreal", "get_freemocap_unreal")),
     "freemocap": (
         "Plan and submit explicit stages to a separate local FreeMoCap service",
         ("get_freemocap_capabilities", "list_freemocap_recordings", "inspect_freemocap_recording",
@@ -615,6 +624,60 @@ _RECIPES = {
 }
 
 
+_RECIPES.update({
+    "native-workspace": {
+        "title": "Use the complete original Kimodo interface",
+        "inputs": {"model": "Exact generation model ID from list_models."},
+        "requirements": ["Pinned upstream and its separately installed demo dependencies and models.",
+                         "Starting this workspace loads a model and reserves the shared generation lease."],
+        "steps": [
+            _step("status", "get_native_workspace", "Read owned-process status without loading models."),
+            _step("start", "start_native_workspace", "Explicitly launch the native UI in a separate workspace.",
+                  arguments_from={"model": "input.model"}, when="The user intends to start the native UI.",
+                  on_failure="Inspect status and bounded logs; address missing dependencies, cached weights or memory."),
+            _step("ready", "get_native_workspace", "Only open the fixed loopback URL after its owned status is ready."),
+            _step("stop", "stop_native_workspace", "Request cooperative shutdown to release generation capacity.",
+                  when="The native session is no longer needed."),
+        ],
+        "completion": "The original UI is ready, or setup failure is explicit; stopping releases its owned lease.",
+        "notes": ["Native timelines, gizmos, model visualizers and file operations retain upstream behavior.",
+                  "Native files are not managed Studio jobs or silently adopted as verified outputs."],
+    },
+    "capture-character": {
+        "title": "Clean up capture, retarget the registered character and import into Unreal",
+        "inputs": {"job_id": "Verified completed FreeMoCap export receipt ID.",
+                   "artifact_path": "Exact receipt-listed BVH path.", "capture_options": "Explicit scale, rest pose and cleanup settings.",
+                   "target": "Existing project, skeleton, skeletal mesh and unused animation name."},
+        "requirements": ["Reviewed FreeMoCap exported armature and unchanged source evidence.",
+                         "Registered fitted character and connected Blender; Unreal must use the matching 24-bone rig.",
+                         "Trim to 2–2400 frames at integer source FPS from 1 to 120; no implicit retiming."],
+        "steps": [
+            _step("history", "list_freemocap_character_handoffs", "Recover prior attempts before preparing or retrying.",
+                  arguments_from={"job_id": "input.job_id"}),
+            _step("source", "inspect_freemocap_retarget_source", "Inspect timing, rest geometry and anatomical mapping.",
+                  arguments_from={"job_id": "input.job_id", "artifact_path": "input.artifact_path"}),
+            _step("prepare", "prepare_freemocap_character", "Save an immutable source-bound cleanup/retarget request.",
+                  arguments_from={"job_id": "input.job_id", "artifact_path": "input.artifact_path", "options": "input.capture_options"}),
+            _step("blender", "execute_freemocap_character", "Bake the fixed target rig and verify exported files.",
+                  arguments_from={"handoff_id": "steps.prepare.handoff_id"},
+                  on_failure="Inspect the saved report and Blender; never blindly repeat uncertain dispatch."),
+            _step("review", "get_freemocap_character", "Review source identity, original trim, cleanup measurements and deformation checks.",
+                  arguments_from={"handoff_id": "steps.prepare.handoff_id"}),
+            _step("unreal_prepare", "prepare_freemocap_unreal", "Prepare animation-only import for the exact target.",
+                  arguments_from={"handoff_id": "steps.prepare.handoff_id", "target": "input.target"},
+                  when="Playback was reviewed and the matching target mesh and skeleton exist."),
+            _step("unreal", "execute_freemocap_unreal", "Verify hierarchy and timing before saving the new animation.",
+                  arguments_from={"handoff_id": "steps.prepare.handoff_id", "target": "input.target"},
+                  when="Unreal preparation succeeded and the intended project is open.",
+                  on_failure="Read get_freemocap_unreal and inspect the exact editor; do not retry uncertain dispatch."),
+        ],
+        "completion": "Verified Blender outputs and, when requested, a matching saved Unreal animation receipt.",
+        "notes": ["Original captures remain unchanged. Smoothing and corrections do not guarantee contact or realism.",
+                  "This fitted character has no independent fingers, face, hair or cloth animation."],
+    },
+})
+
+
 def get_schema_definition(name: str) -> dict[str, Any]:
     """Return a fresh domain JSON Schema; reject arbitrary resource or file names."""
     if name not in _SCHEMAS:
@@ -668,7 +731,8 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
                           "inspect": "inspect_video_mocap_frames", "export": "get_video_mocap_artifact", "requires_character_retargeting": True},
             "freemocap": {"identity": "verified process/export receipt job_id", "representation": "body/hand/face landmark positions with missing-value masks",
                           "inspect": "inspect_freemocap_frames", "quality": "analyze_freemocap_quality", "artifact": "get_freemocap_artifact",
-                          "local_rotations_available": False, "requires_character_retargeting": True},
+                          "local_rotations_available": False, "requires_character_retargeting": True,
+                          "character_workflow": "capture-character", "retarget_input": "verified exported BVH, not raw landmarks"},
             "interchangeable_ids": False, "implicit_conversion": False,
         },
         "freemocap": {"request_schema": "freemocap_request", "workflow": "freemocap",
@@ -729,7 +793,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
         "runtime_requirements": [
             "Discovery, schema access, planning and saved-plan authoring require no model loading or downloads.",
             "Generation requires the separately installed runtime, model access and sufficient memory; default service mode needs an independent worker.",
-            "Downloads default offline; only operator configuration enables them. MCP does not install dependencies, authenticate or start services.",
+            "Downloads default offline; only operator configuration enables them. MCP does not install dependencies or authenticate; only the explicit native-workspace start tool launches the original UI.",
             "Editor reachability is only a local TCP check; it does not verify scene, project, rig or available memory.",
             "The Blender and Unreal fixed-script execution paths require their configured local editor integrations.",
             "Completed-motion conversion needs the export runtime and skeleton assets, but no inference weights, generation worker or editor; downloads are disabled.",
@@ -745,10 +809,10 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
         "unsupported": [
             "Mesh generation or arbitrary character auto-rigging; the supplied character fit is asset-specific.",
             "Facial animation, independent finger animation, cloth/hair physics or collision simulation in the fitted-character workflow.",
-            "Automatic cross-rig retargeting, seamless stitching, velocity matching, arbitrary resampling or automatic contact repair.",
+            "General cross-rig retargeting (the verified FreeMoCap BVH to fitted-character workflow is an explicit exception), seamless stitching, velocity matching, arbitrary resampling or automatic contact repair.",
             "Initial Unreal skeletal-mesh import through this server; use the editor's import tools first.",
             "Arbitrary external file import/conversion, training, benchmark execution or general video/audio rendering; managed NPZ export, bounded video capture and contained explicit FreeMoCap stages are exceptions.",
-            "Arbitrary code execution or file read/write, dependency installation or worker/editor startup; explicit Unreal target paths are a bounded import exception.",
+            "Arbitrary code execution or file read/write, dependency installation or general worker/editor startup; the fixed owned native workspace and explicit Unreal targets are bounded exceptions.",
             "Public remote hosting or multi-user authorization.",
         ],
     }

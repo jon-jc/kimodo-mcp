@@ -1,13 +1,15 @@
 import './styles.css';
 import './rig.css';
 import './sequence.css';
-import { action, anchorFrame, buildBrief, description, duration, getToken, jobId, request, revisionChanges, safeLocalUrl, sampleCount, sampleName, setToken } from './api.js';
+import { action, anchorFrame, buildBrief, description, duration, getToken, jobId, request, safeLocalUrl, sampleCount, sampleName, setToken } from './api.js';
 import { MotionViewer } from './viewer.js';
 import { RigPanel } from './rig-panel.js';
 import { selectedDownloads, selectedPreview as previewFor, sourceKey, variantArgs } from './rig-data.js';
 import { friendlyPlanningError, needsFreshSeed, PlanGate, savedPlanMetadata, savedPlanRoute, savedSequenceNotes, sharedFrameTime, STARTER_SEQUENCES, WORKFLOW_STEPS, workflowKey, workflowState } from './sequence.js';
 import { SequenceComposer } from './sequence-composer.js';
 import { retainSelectedJob, sourceIdentity } from './source-library-data.js';
+import { NativePanel } from './native-panel.js';
+import { composeNativeRequest, exportOptions } from './native-data.js';
 
 const $ = id => document.getElementById(id);
 const state = { jobs: [], selected: null, sample: 0, variant: null, viewerMode: 'character', characterInfo: null, revision: null, revisionBase: null, connected: false, polling: false, previewUrl: null, previewLoaded: false, loadedInitial: false, jobSignature: '', comparisonSignature: '', selectionSignature: '', previews: new Map(), verifiedOutputs: new Map(), inspecting: 0, busy: new Set() };
@@ -74,7 +76,7 @@ function viewerMessage(title, detail) {
   $('viewer-message').querySelector('strong').textContent = title;
   $('viewer-message').querySelector('p').textContent = detail;
 }
-let viewer, rigPanel;
+let viewer, rigPanel, nativePanel;
 function showTime(kind, time, total, playing) {
   if (state.viewerMode !== kind) return;
   $('time-label').textContent = `${time.toFixed(2)} / ${total.toFixed(2)} s`;
@@ -195,12 +197,12 @@ for (const [id, method] of [['wireframe', 'setWireframe'], ['skeleton', 'setSkel
 
 function brief(resolveSeed = false) {
   const beats = $('sequence-mode').checked ? composer.getBeats() : undefined;
-  const value = buildBrief({ description: $('description').value, duration: $('duration').value, quality: $('quality').value, candidates: $('candidates').value, seed: $('seed').value, beats, model: state.composerModel });
+  const value = buildBrief({ description: $('description').value, duration: $('duration').value, quality: $('quality').value === 'custom' ? 'balanced' : $('quality').value, candidates: $('candidates').value, seed: $('seed').value, beats, model: nativePanel?.model.value ?? state.composerModel });
   if (resolveSeed && needsFreshSeed(value, state.savedPlan, state.savedBaseline)) { value.seed = crypto.getRandomValues(new Uint32Array(1))[0]; $('seed').value = value.seed; }
   return value;
 }
 function startFrom() {
-  if (!$('start-pose').checked || $('start-pose').disabled || state.revision || state.savedPlan) return {};
+  if (!$('start-pose').checked || $('start-pose').disabled || state.revision || state.savedPlan || state.importedRequest) return {};
   const job = current();
   const timing = selectedTiming();
   return { start_from: { job_id: jobId(job), sample_index: state.sample, ...variantArgs(state.variant), frame: anchorFrame(activeViewer().time, timing.frames, timing.fps) } };
@@ -210,6 +212,25 @@ function invalidatePlan() { state.planGate.invalidate(); composer?.setPlan(null)
 function countCharacters() { $('character-count').textContent = `${$('description').value.length} / 2000`; invalidatePlan(); }
 $('description').addEventListener('input', countCharacters);
 const composer = new SequenceComposer({ container: $('beats'), timeline: $('sequence-timeline'), total: $('sequence-total'), onChange: invalidatePlan, onError: error => notice(error.message, true) });
+nativePanel = new NativePanel({
+  container: $('native-panel'), onChange: () => { invalidatePlan(); enableActions(); }, onError: error => notice(error.message, true),
+  onSteps: steps => { $('quality').value = ({ 20: 'draft', 50: 'balanced', 80: 'detailed' })[steps] ?? 'custom'; },
+  onImport: importNativeRequest,
+  getRequest: async () => {
+    if (!validCreateForm()) throw new Error('Complete the highlighted draft fields first.');
+    const result = state.planGate.current(draftInput()) ?? await previewCurrentPlan();
+    if (!result) throw new Error('The draft changed. Validate the current request again.');
+    return result.request;
+  },
+  getSources: () => state.jobs.filter(job => job.status === 'completed' && job.manifest?.skeleton?.startsWith('soma')).flatMap(job => {
+    const id = jobId(job), sources = [];
+    for (let sample = 0; sample < sampleCount(job); sample++) {
+      sources.push({ key: `${id}:${sample}`, label: `${description(job).slice(0, 50)} · ${id.slice(0, 6)} · candidate ${sample + 1} · original`, arguments: { job_id: id, sample_index: sample } });
+      for (const variant of (job.variants ?? []).filter(item => item.sample_index === sample)) sources.push({ key: `${id}:${sample}:${variant.variant_id}`, label: `${description(job).slice(0, 38)} · candidate ${sample + 1} · edited ${variant.variant_id.slice(0, 8)}`, arguments: { job_id: id, sample_index: sample, variant_id: variant.variant_id } });
+    }
+    return sources;
+  }),
+});
 function updateSequence() {
   const enabled = $('sequence-mode').checked; $('sequence-panel').hidden = !enabled; $('duration').disabled = enabled;
   document.querySelector('.workspace').classList.toggle('sequence-authoring', enabled);
@@ -218,7 +239,8 @@ function updateSequence() {
 }
 $('sequence-mode').addEventListener('change', () => { if ($('sequence-mode').checked && !composer.beats.length) composer.replace([{ text: '', duration: 2 }, { text: '', duration: 2 }]); updateSequence(); });
 $('add-beat').addEventListener('click', () => composer.add());
-for (const id of ['duration', 'quality', 'candidates', 'seed']) $(id).addEventListener('input', invalidatePlan);
+for (const id of ['duration', 'candidates', 'seed']) $(id).addEventListener('input', invalidatePlan);
+$('quality').addEventListener('change', () => { const steps = { draft: 20, balanced: 50, detailed: 80 }[$('quality').value]; if (steps) nativePanel.setSteps(steps); });
 $('apply-starter').addEventListener('click', () => {
   const starter = STARTER_SEQUENCES[$('sequence-starter').value]; if (!starter) return;
   $('sequence-mode').checked = true; $('description').value = starter.description;
@@ -227,7 +249,7 @@ $('apply-starter').addEventListener('click', () => {
   notice('Starter actions loaded as editable text and timing. Review each action before previewing the plan.');
 });
 document.querySelectorAll('[data-preset]').forEach(button => button.addEventListener('click', () => { $('description').value = presets[button.dataset.preset]; countCharacters(); $('description').focus(); }));
-$('clear-revision').addEventListener('click', () => { state.revision = null; state.revisionBase = null; state.revisionRequest = null; $('sequence-mode').disabled = false; $('revision-note').hidden = true; $('generate-label').textContent = 'Generate animation'; invalidatePlan(); enableActions(); });
+$('clear-revision').addEventListener('click', () => { state.revision = null; state.revisionBase = null; state.revisionRequest = null; state.importedRequest = null; nativePanel.load({}); $('sequence-mode').disabled = false; $('revision-note').hidden = true; $('generate-label').textContent = 'Generate animation'; invalidatePlan(); enableActions(); });
 
 async function withBusy(button, task, message) {
   if (state.busy.has(button.id)) return;
@@ -239,7 +261,8 @@ async function withBusy(button, task, message) {
 
 function draftInput() {
   return { brief: brief(), start_from: startFrom().start_from ?? null, saved_plan_id: state.savedPlan?.plan_id ?? null,
-    revision_job_id: state.revision ?? null, clear_constraints: $('clear-plan-constraints').checked };
+    revision_job_id: state.revision ?? null, imported_request: state.importedRequest ?? null,
+    native: nativePanel.snapshot(), clear_constraints: $('clear-plan-constraints').checked };
 }
 function planMetadata() {
   return savedPlanMetadata(state.savedPlan, { title: $('saved-plan-title').value, sequence: $('sequence-mode').checked, notes: $('description').value }, state.savedContext);
@@ -252,19 +275,19 @@ function savedDirty() {
   if (!state.savedPlan) return false;
   try {
     return savedPlanRoute(state.savedPlan, brief(), state.savedBaseline, $('clear-plan-constraints').checked).kind !== 'exact'
-      || planMetadata().changed;
+      || nativePanel.dirty() || planMetadata().changed;
   } catch { return true; }
 }
 function renderSavedState() {
   const saved = state.savedPlan, dirty = savedDirty();
   $('loaded-plan-note').hidden = !saved;
   if (saved) $('loaded-plan-label').textContent = `${saved.title} · ${saved.plan_id.slice(0, 8)} · ${saved.request.model}`;
-  $('saved-advanced-note').textContent = saved ? `Saved request: ${saved.request.steps} sampling steps · ${(saved.request.constraints ?? []).length} constraint set(s) · ${(saved.request.formats ?? []).join(', ')}. The displayed detail preset changes these sampling steps only if you select a different preset.` : '';
+  $('saved-advanced-note').textContent = saved ? `Saved request: ${saved.request.steps} sampling steps · ${(saved.request.constraints ?? []).length} constraint set(s) · ${(saved.request.formats ?? []).join(', ')}. Native controls show the exact saved settings.` : '';
   $('saved-plan-status').textContent = saved ? dirty ? 'Unsaved changes. Preview and save a new version before generating.' : 'Exact saved request ready. Model, constraints and advanced settings are preserved.' : 'Save a validated plan to reuse its exact settings across the studio and connected agents.';
-  const constraints = (saved?.request ?? state.revisionRequest)?.constraints ?? [];
+  const constraints = (saved?.request ?? state.revisionRequest ?? state.importedRequest)?.constraints ?? [];
   $('clear-plan-constraints-label').hidden = !constraints.length;
   $('clear-plan-constraints').disabled = !constraints.length;
-  $('saved-constraint-note').textContent = constraints.length ? `${constraints.length} saved constraint set(s). Changing frame allocations requires explicitly clearing them; text-only edits at the same frame allocations preserve them.` : '';
+  $('saved-constraint-note').textContent = constraints.length ? `${constraints.length} saved constraint set(s). Changing model or frame allocations requires explicitly clearing them; text-only edits at the same frame allocations preserve them.` : '';
   for (const id of ['save-plan', 'refresh-plans', 'load-plan', 'previous-plans', 'next-plans']) $(id).disabled = !state.connected || state.busy.has(id) || state.busy.has('load-plan') || state.busy.has('generate') || state.busy.has('refresh-plans')
     || (id === 'load-plan' && !$('saved-plan-list').value) || (id === 'save-plan' && Boolean(saved && !dirty))
     || (id === 'previous-plans' && state.libraryOffset <= 0) || (id === 'next-plans' && !(state.libraryOffset + 20 < state.libraryTotal));
@@ -287,17 +310,15 @@ function displayPlan(result) {
 }
 async function previewCurrentPlan() {
   const input = brief(true), snapshot = draftInput(), ticket = state.planGate.begin(snapshot);
-  let result;
-  if (state.savedPlan) {
-    const route = savedPlanRoute(state.savedPlan, input, state.savedBaseline, snapshot.clear_constraints);
-    result = route.kind === 'exact' ? await action('get_animation_plan', { plan_id: route.plan_id })
-      : await action('revise_animation_plan', { plan_id: route.plan_id, revision: route.revision, save: false });
-  } else if (state.revision) {
-    const changes = revisionChanges(input, state.revisionBase);
-    if (snapshot.clear_constraints) changes.clear_constraints = true;
-    if (!Object.keys(changes).length) throw new Error('Change a setting or the description to preview a revision.');
-    result = await action('revise_animation', { job_id: state.revision, revision: changes, submit: false });
-  } else result = await action('plan_animation', { brief: input, ...(snapshot.start_from ? { start_from: snapshot.start_from } : {}) });
+  const settings = nativePanel.values(), stagedConstraints = structuredClone(nativePanel.constraints);
+  const stored = state.savedPlan?.request ?? state.revisionRequest ?? state.importedRequest;
+  const compiled = stored ? { request: structuredClone(stored), notes: ['Unedited request settings and source constraints are preserved.'] }
+    : await action('plan_animation', { brief: input, ...(snapshot.start_from ? { start_from: snapshot.start_from } : {}) });
+  const authoredConstraints = !stored && snapshot.start_from && stagedConstraints !== null ? [...compiled.request.constraints, ...stagedConstraints] : stagedConstraints;
+  const completeRequest = composeNativeRequest(compiled.request, input, settings, { constraints: authoredConstraints, clearConstraints: snapshot.clear_constraints,
+    preserveInitialHeading: Boolean(!stored && snapshot.start_from && !nativePanel.fieldChanged('first_heading_angle')) });
+  const checked = await action('validate_motion', { request: completeRequest });
+  const result = { ...compiled, ...checked };
   let currentInput;
   try { currentInput = draftInput(); } catch { notice('The draft changed while the plan was being checked. Preview the current draft again.'); return null; }
   if (!state.planGate.accept(ticket, currentInput, result)) { notice('The draft changed while the plan was being checked. Preview the current draft again.'); return null; }
@@ -306,6 +327,7 @@ async function previewCurrentPlan() {
 }
 function validCreateForm() {
   if ($('sequence-mode').checked && !composer.reportValidity()) return false;
+  if (!nativePanel.reportValidity()) return false;
   return $('create-form').reportValidity();
 }
 $('plan').addEventListener('click', () => withBusy($('plan'), async () => { if (validCreateForm()) await previewCurrentPlan(); }));
@@ -330,16 +352,31 @@ function loadSavedPlan(record) {
   if (!record.request || !record.plan || !/^[0-9a-f]{64}$/.test(record.plan_id)) throw new Error('The server did not return a complete saved plan.');
   const request = record.request, segments = request.segments;
   state.savedPlan = record; state.revision = null; state.revisionBase = null; state.revisionRequest = null;
+  state.importedRequest = null; nativePanel.load(request);
   state.composerModel = request.model; $('revision-note').hidden = true; $('start-pose').checked = false;
   $('saved-plan-title').value = record.title; $('clear-plan-constraints').checked = false;
   $('description').value = segments.length > 1 ? savedSequenceNotes(record) : segments[0].text;
   $('duration').value = segments[0].duration; $('seed').value = request.seed; $('candidates').value = request.samples;
-  $('quality').value = request.steps >= 70 ? 'detailed' : request.steps <= 20 ? 'draft' : 'balanced';
   $('sequence-mode').checked = segments.length > 1; $('sequence-mode').disabled = segments.length > 1;
   composer.replace(segments.length > 1 ? segments : [segments[0], { text: '', duration: 2 }]); updateSequence(); countCharacters();
   state.savedBaseline = brief(); state.savedContext = $('description').value.trim();
   const snapshot = draftInput(), ticket = state.planGate.begin(snapshot); state.planGate.accept(ticket, snapshot, record);
   displayPlan(record); enableActions();
+}
+async function importNativeRequest(request, stillCurrent = () => true) {
+  const snapshot = loadInput(), ticket = state.loadGate.begin(snapshot);
+  const result = await action('validate_motion', { request });
+  if (!stillCurrent() || !state.loadGate.accept(ticket, loadInput(), result)) throw new Error('The current draft changed while checking this file. Apply the request again when ready.');
+  const value = result.request, segments = value.segments;
+  state.savedPlan = null; state.savedBaseline = null; state.savedContext = null; state.revision = null; state.revisionBase = null; state.revisionRequest = null;
+  state.importedRequest = structuredClone(value); nativePanel.load(value); $('start-pose').checked = false;
+  $('description').value = segments.length > 1 ? 'Imported native sequence' : segments[0].text;
+  $('duration').value = segments[0].duration; $('seed').value = value.seed; $('candidates').value = value.samples;
+  $('sequence-mode').checked = segments.length > 1; $('sequence-mode').disabled = false;
+  $('clear-plan-constraints').checked = false; $('revision-note').hidden = true; $('generate-label').textContent = 'Generate animation';
+  composer.replace(segments.length > 1 ? segments : [segments[0], { text: '', duration: 2 }]); updateSequence(); countCharacters();
+  const input = draftInput(), planTicket = state.planGate.begin(input); state.planGate.accept(planTicket, input, result);
+  displayPlan(result); enableActions(); notice('Complete request validated and loaded. Nothing generated. Save a reusable plan or review the settings before generating.');
 }
 $('saved-library').addEventListener('toggle', () => { if ($('saved-library').open && !state.libraryLoaded && state.connected) withBusy($('refresh-plans'), () => refreshPlanLibrary()); });
 $('refresh-plans').addEventListener('click', () => withBusy($('refresh-plans'), () => refreshPlanLibrary()));
@@ -369,6 +406,7 @@ $('save-plan').addEventListener('click', () => withBusy($('save-plan'), async ()
 }));
 $('new-plan').addEventListener('click', () => {
   state.savedPlan = null; state.savedBaseline = null; state.savedContext = null; state.revision = null; state.revisionBase = null; state.revisionRequest = null;
+  state.importedRequest = null; nativePanel.load({});
   $('sequence-mode').disabled = false; $('clear-plan-constraints').checked = false; $('revision-note').hidden = true; $('generate-label').textContent = 'Generate animation';
   invalidatePlan(); enableActions(); notice('New brief started with the visible actions. Saved constraints and advanced request settings are no longer attached.');
 });
@@ -395,13 +433,9 @@ $('create-form').addEventListener('submit', event => {
       selectSubmittedJob(result, selection);
       notice('The exact saved plan was queued. Its progress will appear in your animation history.'); await refresh(); return;
     }
-    const input = brief(true);
-    const changes = state.revision ? revisionChanges(input, state.revisionBase) : null;
-    if (changes && $('clear-plan-constraints').checked) changes.clear_constraints = true;
-    if (state.revision && !Object.keys(changes).length) throw new Error('Change the description or a setting to create a revision. The original request stays saved.');
-    const result = state.revision
-      ? await action('revise_animation', { job_id: state.revision, revision: changes, submit: true })
-      : await action('generate_animation', { brief: input, ...startFrom() });
+    const compiled = state.planGate.current(draftInput()) ?? await previewCurrentPlan();
+    if (!compiled) return;
+    const result = await action('generate_motion', { request: compiled.request });
     selectSubmittedJob(result, selection);
     notice('Animation queued. Its progress will appear in your animation history.');
     await refresh();
@@ -415,7 +449,7 @@ function enableActions() {
   const job = current(), preview = selectedPreview(job, state.sample, state.variant);
   const matchingView = state.viewerMode === 'source' ? rigPanel?.loadedKey === currentKey() : state.previewLoaded && safeLocalUrl(preview?.url) === state.previewUrl;
   const unsavedPose = state.viewerMode === 'source' && rigPanel?.hasDraftPreview;
-  const canAnchor = completed() && !state.revision && !state.savedPlan && matchingView && !unsavedPose && ['somaskel30', 'somaskel77'].includes(job?.manifest?.skeleton);
+  const canAnchor = completed() && !state.revision && !state.savedPlan && !state.importedRequest && matchingView && !unsavedPose && nativePanel.model.value.includes('-soma-') && ['somaskel30', 'somaskel77'].includes(job?.manifest?.skeleton);
   $('start-pose').disabled = !canAnchor;
   if (!canAnchor) $('start-pose').checked = false;
   $('saved-export-note').textContent = unsavedPose
@@ -438,13 +472,13 @@ function timeAgo(job) {
 function revise(job) {
   setWorkflow('create');
   state.savedPlan = null; state.savedBaseline = null; state.composerModel = job.request?.model; state.revisionRequest = job.request;
+  state.importedRequest = null; nativePanel.load(job.request);
   $('clear-plan-constraints').checked = false;
   state.revision = jobId(job);
   $('description').value = description(job);
   $('duration').value = Math.min(duration(job), 10);
   $('seed').value = job.request?.seed ?? '';
   $('candidates').value = job.request?.samples ?? 1;
-  $('quality').value = job.request?.steps >= 70 ? 'detailed' : job.request?.steps <= 20 ? 'draft' : 'balanced';
   $('sequence-mode').checked = job.request?.segments?.length > 1;
   $('sequence-mode').disabled = $('sequence-mode').checked;
   composer.replace($('sequence-mode').checked ? job.request.segments : [job.request.segments[0], { text: '', duration: 2 }]);
@@ -589,6 +623,9 @@ async function renderSelection() {
   $('metrics').replaceChildren(metric('Duration', timing.frames && timing.fps ? `${(timing.frames / timing.fps).toFixed(2)} s` : `${duration(job).toFixed(2)} s`), metric('Frames', String(timing.frames ?? '—')), metric('Seed', String(job.request?.seed ?? '—')));
   const format = job.manifest?.skeleton?.startsWith('soma') ? 'bvh' : job.manifest?.skeleton?.startsWith('smpl') ? 'amass' : 'csv';
   $('motion-export-format').value = format;
+  $('export-bvh-option').hidden = format !== 'bvh';
+  $('export-amass-option').hidden = format !== 'amass';
+  $('export-csv-option').hidden = format !== 'csv';
   [...$('motion-export-format').options].forEach(option => { option.disabled = option.value !== format; });
   if (job.status !== 'completed') {
     $('candidates-list').append(el('div', 'empty-inline', ['failed', 'cancelled'].includes(job.status) ? 'This job has no completed candidates. Revise or retry its saved request.' : 'Candidates appear after generation finishes. You can keep creating while this job runs.'));
@@ -631,6 +668,7 @@ async function refresh() {
   try {
     const result = await request('/api/state'); setToken(result.csrf_token);
     state.connected = true;
+    nativePanel.run(() => nativePanel.loadCatalog());
     const recent = Array.isArray(result.jobs) ? result.jobs : [];
     state.jobs = retainSelectedJob(recent, state.selected, state.jobs);
     const selected = state.selected;
@@ -739,7 +777,9 @@ $('send-unreal').addEventListener('click', () => withBusy($('send-unreal'), asyn
 
 $('export-motion').addEventListener('click', () => withBusy($('export-motion'), async () => {
   const id = state.selected;
-  const result = await action('export_motion', { job_id: id, sample_index: state.sample, format: $('motion-export-format').value, ...variantArgs(state.variant) });
+  const format = $('motion-export-format').value;
+  const options = exportOptions(format, { bvh_standard_tpose: $('export-standard-tpose').checked, amass_z_up: $('export-amass-z-up').checked, mujoco_rest_zero: $('export-mujoco-rest').checked });
+  const result = await action('export_motion', { job_id: id, sample_index: state.sample, format, ...options, ...variantArgs(state.variant) });
   const url = safeLocalUrl(result.artifact?.url);
   if (!url) throw new Error('Export completed without a browser download URL. Refresh the verified output list.');
   await refreshVerifiedOutputs(id);

@@ -29,7 +29,8 @@ from .capabilities import (
     get_workflow_definition,
 )
 from .capacity import capacity_snapshot, editor_connections
-from .catalog import list_models
+from .capture_retarget_api import register_capture_retarget_tools
+from .catalog import ModelName, list_models
 from .config import UPSTREAM_REVISION, Settings
 from .freemocap_api import register_freemocap_tools
 from .handoff import UnrealTarget
@@ -110,6 +111,28 @@ def create_server(
     def get_workflow(workflow: WorkflowName) -> dict[str, Any]:
         """Get an ordered workflow recipe, required inputs, completion evidence and recovery guidance; run nothing."""
         return get_workflow_definition(workflow)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_native_workspace() -> dict[str, Any]:
+        """Inspect the separately owned original Kimodo UI without starting models or services."""
+        from .native_demo import get_native_workspace as status
+        return status(settings)
+
+    @mcp.tool(annotations=GENERATION)
+    def start_native_workspace(model: ModelName = "kimodo-soma-rp-v1.2") -> dict[str, Any]:
+        """Explicitly start the original native Kimodo UI on loopback, with all its native controls.
+
+        This separate workspace loads models and takes the generation lease. Its local files are not
+        managed Studio jobs. Cached models and dependencies are required unless the operator allowed downloads.
+        """
+        from .native_demo import start_native_workspace as start
+        return start(settings, model)
+
+    @mcp.tool(annotations=CONFIG_WRITE)
+    def stop_native_workspace() -> dict[str, Any]:
+        """Request cooperative shutdown of only this bridge's owned native workspace."""
+        from .native_demo import stop_native_workspace as stop
+        return stop(settings)
 
     @mcp.tool(annotations=READ_ONLY)
     def get_input_schema(schema_name: SchemaName) -> dict[str, Any]:
@@ -1041,6 +1064,7 @@ def create_server(
 
     register_video_tools(mcp, settings)
     register_freemocap_tools(mcp, settings)
+    register_capture_retarget_tools(mcp, settings)
     return mcp
 
 

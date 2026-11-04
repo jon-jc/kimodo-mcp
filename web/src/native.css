@@ -1,0 +1,26 @@
+.native-controls { margin: 16px 0; padding: 13px 0; border-block: 1px solid var(--line); }
+.native-controls summary { cursor: pointer; color: #d0c5eb; font-size: 12px; line-height: 1.5; }
+.native-controls > summary { font-weight: 650; }
+.native-section { margin-top: 13px; padding: 11px 10px; border: 1px solid #363847; border-radius: 7px; background: #191c27; }
+.native-section[open] > summary { margin-bottom: 10px; }
+.native-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+.native-field { min-width: 0; margin-top: 9px; }
+.native-field > label, .native-path-row > label { display: block; font-size: 10px; line-height: 1.5; color: #abb5cb; margin-bottom: 5px; }
+.native-field input, .native-field select, .native-field textarea { margin-top: 5px; width: 100%; min-width: 0; font-size: 11px; }
+.native-field textarea { min-height: 120px; font-family: ui-monospace,monospace; }
+.native-check { display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; font-size: 11px; line-height: 1.6; color: #b6bfd2; }
+.native-check input { flex: 0 0 15px; width: 15px; height: 15px; margin: 2px 0 0; }
+.native-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.native-constraint-row { padding: 8px 0; border-bottom: 1px solid #353746; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.native-constraint-row > span { flex: 1 1 150px; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.native-path-row { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; border-bottom: 1px solid #363847; padding: 10px 0; }
+.native-path-row input { min-width: 0; font-size: 11px; margin-top: 3px; }
+.native-path-row button { grid-column: 1/-1; justify-self: start; }
+.native-controls input[type=file] { padding: 7px; white-space: normal; }
+.native-controls a.button { margin-top: 12px; display: inline-flex; }
+.native-controls a[hidden] { display: none; }
+.native-log { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; line-height: 1.5; margin-top: 12px; }
+.native-export-options { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 17px; }
+.native-export-options label { font-size: 11px; display: flex; gap: 7px; align-items: center; }
+.native-export-options input { width: auto; margin: 0; }
+@media(max-width:380px) { .native-grid { grid-template-columns: minmax(0,1fr); } }

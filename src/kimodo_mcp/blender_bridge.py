@@ -203,6 +203,9 @@ def _validate_glb(path: Path, request: dict[str, Any], bones: list[dict[str, Any
 def _validate_report(
     directory: Path, request: dict[str, Any], expected_bones: list[dict[str, Any]],
 ) -> dict[str, Any]:
+    if request["kind"] == "capture_character":
+        from .capture_retarget import _validate_capture_report
+        return _validate_capture_report(directory, request, expected_bones)
     report = _read_json(directory / "blender-report.json")
     character = request["kind"] == "character"
     frame_range = report.get("frame_range")
@@ -280,7 +283,7 @@ def _receive(connection: socket.socket) -> dict[str, Any]:
 
 
 def execute_handoff(
-    script_path: Path, source_kind: Literal["skeleton", "character"] = "skeleton",
+    script_path: Path, source_kind: Literal["skeleton", "character", "capture_character"] = "skeleton",
 ) -> dict[str, Any]:
     """Run a fixed managed script once, or validate its completed receipt.
 
@@ -288,9 +291,9 @@ def execute_handoff(
     or template can be supplied by prompt text. After an uncertain dispatch,
     inspect the existing receipt; this function never resends that operation.
     """
-    if source_kind not in {"skeleton", "character"}:
-        raise ValueError("Source kind must be skeleton or character.")
-    kind = "blender" if source_kind == "skeleton" else "character"
+    if source_kind not in {"skeleton", "character", "capture_character"}:
+        raise ValueError("Source kind must be skeleton, character or capture_character.")
+    kind = "blender" if source_kind == "skeleton" else source_kind
     script = Path(script_path)
     if script.is_symlink() or script.name != kind + "_handoff.py":
         raise ValueError("Expected the managed Blender handoff script.")
@@ -302,7 +305,11 @@ def execute_handoff(
         raise ValueError("Prepared script differs from the bundled trusted Blender handoff; prepare it again.")
     request_path = directory / "handoff.json"
     request = _read_json(request_path)
-    expected_bones = _validate_request(request, kind)
+    if kind == "capture_character":
+        from .capture_retarget import _validate_capture_request
+        expected_bones = _validate_capture_request(request, directory)
+    else:
+        expected_bones = _validate_request(request, kind)
     request_hash = _digest(request_path)
     lock = FileLock(str(Path(tempfile.gettempdir()) / "kimodo-blender-command-9876.lock"), timeout=0)
     try:

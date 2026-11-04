@@ -20,6 +20,8 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
 from .capacity import capacity_snapshot, editor_connections
+from .capture_retarget_api import TOOL_NAMES as CAPTURE_RETARGET_TOOL_NAMES
+from .capture_retarget_api import capture_retarget_routes
 from .config import Settings
 from .freemocap_api import TOOL_NAMES as FREEMOCAP_TOOL_NAMES
 from .freemocap_api import freemocap_routes
@@ -33,6 +35,9 @@ from .workspace import Workspace
 _MAX_BODY = 1024 * 1024
 _ACTIONS = {
     "list_motion_sources",
+    "get_native_workspace",
+    "start_native_workspace",
+    "stop_native_workspace",
     "plan_animation",
     "generate_animation",
     "revise_animation",
@@ -81,6 +86,7 @@ _ACTIONS = {
     "inspect_motion_rig",
     *VIDEO_TOOL_NAMES,
     *FREEMOCAP_TOOL_NAMES,
+    *CAPTURE_RETARGET_TOOL_NAMES,
 }
 
 
@@ -301,6 +307,7 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
             Route("/api/files/{job_id}/{path:path}", download),
             *video_routes(settings, csrf),
             *freemocap_routes(settings),
+            *capture_retarget_routes(settings),
             Route("/{path:path}", web),
         ]
     )

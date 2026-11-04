@@ -92,6 +92,26 @@ def artifact_record(path: Path, format_name: str, sample: int) -> dict:
     }
 
 
+def project_g1_output(output: dict, model) -> dict:
+    """Apply the demo's clamped G1 projection without leaving stale local rotations.
+
+    The native display helper returns positions/global rotations only. Use its
+    underlying converter so NPZ and CSV exports share the same projected local
+    rotations, root positions and forward kinematics. Root trajectory/heading
+    and model-predicted contact labels remain unchanged, as in the native demo.
+    """
+    import torch
+    from kimodo.exports.mujoco import MujocoQposConverter
+
+    device = model.device
+    projected = MujocoQposConverter(model.output_skeleton).project_to_real_robot_rotations(
+        torch.from_numpy(output["local_rot_mats"]).to(device),
+        torch.from_numpy(output["root_positions"]).to(device),
+        clamp_to_limits=True,
+    )
+    return {**output, **{key: value.detach().cpu().numpy() for key, value in projected.items()}}
+
+
 def export_samples(output: dict, request: GenerateRequest, model, directory: Path, fps: float) -> list[dict]:
     import numpy as np
     import torch
@@ -213,19 +233,30 @@ def generate(request: GenerateRequest, directory: Path) -> dict:
         result = model(
             [segment.text for segment in request.segments], plan["segment_frames"],
             num_denoising_steps=request.steps, num_samples=request.samples, multi_prompt=True,
-            constraint_lst=constraints, cfg_type="separated",
-            cfg_weight=[request.cfg_text, request.cfg_constraint],
+            constraint_lst=constraints, cfg_type=request.cfg_type,
+            cfg_weight=request.cfg_weight,
             first_heading_angle=request.first_heading_angle,
             num_transition_frames=request.transition_frames,
             post_processing=plan["postprocess"], root_margin=request.root_margin,
             return_numpy=True, progress_bar=lambda iterator: iterator,
         )
     clean = validate_output(result, request, plan["total_frames"], info["output_joints"])
+    if request.real_robot_rotations:
+        write_progress(directory, "projecting_g1", **plan)
+        with torch.inference_mode():
+            clean = project_g1_output(clean, model)
+        clean = validate_output(clean, request, plan["total_frames"], info["output_joints"])
     write_progress(directory, "exporting", **plan)
     artifacts = export_samples(clean, request, model, directory, fps)
     warnings = []
     if request.postprocess and not plan["postprocess"]:
         warnings.append("Postprocessing is disabled for G1, following the upstream generation CLI.")
+    if request.real_robot_rotations:
+        warnings.append(
+            "G1 joint rotations are projected to native hinge axes and XML limits. "
+            "Contact labels remain model predictions; projection can move feet and constraints "
+            "and does not establish physical feasibility or safe robot execution."
+        )
     if getattr(model.skeleton, "nbjoints", None) == 30:
         warnings.append("SOMA output expands the compact model skeleton with relaxed hand poses; detailed finger motion is not independently generated.")
     manifest = {

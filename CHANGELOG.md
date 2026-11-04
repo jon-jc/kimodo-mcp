@@ -2,6 +2,26 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-03 — Native authoring controls and capture-to-character delivery
+
+### Added
+
+- Complete managed native-generation settings in Studio: nine reviewed models, exact sampling steps, separated/combined/disabled guidance, all guidance weights, transitions, heading, root margin, supported postprocessing, G1 projection and export flags. Root-path anchor tables support explicit bounded interpolation; saved source frames supply pose/limb constraints; complete request/constraint JSON can be validated and applied explicitly.
+- A separate original-Kimodo workspace with status, explicit model start and owned stop controls. The fixed loopback worker holds the generation lease, copies packaged examples outside the upstream checkout, verifies pinned source and its actual host/port, and reports bounded logs and heartbeat state. It does not start automatically or share native session files with managed job history.
+- Nine shared capture-character MCP tools: source inspection, immutable cleanup preparation, explicit Blender execution, verified result/artifact access, bounded history and separate Unreal preparation/execution/report recovery. Discovery now exposes 80 tools, 18 recipes and 12 schemas. New MCP operations return structured results.
+- Verified FreeMoCap export BVH retargeting to the registered fitted 24-bone character. Required scale/T/A rest-pose interpretation, 2–2,400-frame trim, preserved integer FPS, bounded quaternion/root smoothing, tapered windows and up to 16 local joint corrections are bound to immutable source, target, receipt and script identities.
+- Responsive capture cleanup/review/delivery workspace with shared agent history, execution gates, animated character preview, six verified downloads and a distinct Unreal target/import stage. Changed settings invalidate prepared execution; uncertain editor dispatch cannot be automatically repeated.
+- Capture animation FBX, character FBX, Blender scene, animated GLB, cleaned character-motion NPZ and numerical cleanup report. Animation-only Unreal delivery preserves capture timing and uses an explicit matching existing project/rig and new asset name.
+- Detailed native feature coverage and capture-retarget guides, updated MCP recipes and current Studio screenshots. Legacy saved-plan IDs remain valid when compatible defaulted request fields are introduced.
+
+### Validation and boundaries
+
+- Full local suite passed 1,015 Python tests with one Windows symlink skip; 119 frontend tests, lint and production build passed. Additional focused checks cover structured MCP/HTTP parity, all six artifacts, source/target tampering, FPS preservation and unresolved editor dispatch.
+- Fresh headless Blender validation used the actual registered character with synthetic T/A motions at 24/30/60 FPS. All 24 bones and all 12 frames passed FBX roundtrip checks, with maximum positional error below 0.000001 m, no unweighted vertices and unchanged source BVHs. No open Blender scene or Unreal project was modified by these tests.
+- Studio checks exercised native controls, read-only native-workspace status, completed capture recovery, GLB playback, download links, edited-setting gates and narrow layouts. Fresh stdio and loopback HTTP checks cover the complete tool/schema/recipe catalog.
+- Native G1 projection matched the reviewed converter and independent forward kinematics on synthetic CPU arrays. It is kinematic projection only, not robot dynamics or safe actuation. The optional native demo was not launched; its visualizers still require their separate runtime dependencies and model/body assets.
+- Real capture reconstruction and live Unreal acceptance remain untested. The capture retarget discards non-root translations to preserve target lengths, derives toe motion from feet, and does not transfer independent fingers/face/cloth or automatically solve contacts. Original BVH frame numbering remains authoritative, including any exporter reference-pose lead-in.
+
 ## 2026-11-03 — Shared source history and verified capture review
 
 ### Added
