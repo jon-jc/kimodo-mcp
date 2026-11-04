@@ -35,6 +35,7 @@ export function sampleCount(job) { return job?.manifest?.samples ?? job?.request
 
 export function buildBrief(values) {
   const brief = { description: values.description.trim(), duration_seconds: Number(values.duration), quality: values.quality, candidates: Number(values.candidates) };
+  if (values.model) brief.model = values.model;
   if (!brief.description) throw new Error('Describe the movement before generating.');
   if (values.beats) {
     if (!Array.isArray(values.beats) || values.beats.length < 2 || values.beats.length > 8) throw new Error('A sequence needs two to eight timed actions.');
@@ -56,6 +57,7 @@ export function buildBrief(values) {
 
 export function revisionChanges(input, previous) {
   const changes = Object.fromEntries(Object.entries(input).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(previous?.[key])));
+  delete changes.model;
   if (input.beats) { delete changes.description; delete changes.duration_seconds; }
   return changes;
 }

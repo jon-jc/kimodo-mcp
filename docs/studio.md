@@ -2,13 +2,13 @@
 
 The studio is a local browser interface to the same planning, jobs, diagnostics, and editor operations exposed by Kimodo MCP. It lets you move from a description to reviewed animation without manually copying requests between tools.
 
-MCP clients can use `get_capabilities`, `get_workspace_state`, and `get_workflow` to discover the same workspace and complete workflows. `build_character_preview`, saved Unreal targets, and verified output listing are shared operations, available directly through MCP as well as the studio. The browser owns interactive camera and playback controls. See [the agent workflow guide](agent-workflows.md) for discovery, selected-frame inspection, reusable constraints, and exact tool contracts.
+MCP clients can use `get_capabilities`, `get_workspace_state`, and `get_workflow` to discover the same workspace and complete workflows. Saved animation plans, `build_character_preview`, saved Unreal targets, and verified output listing are shared operations, available directly through MCP as well as the studio. The browser owns interactive camera and playback controls. See [the agent workflow guide](agent-workflows.md) for discovery, selected-frame inspection, reusable constraints, and exact tool contracts.
 
 Opening the interface does not download model weights or start inference. A connected studio, an available worker, an installed runtime, authorized models, and sufficient memory are separate readiness conditions.
 
-![Real local studio with the selected textured character, source-pose controls, diagnostics, downloads, and saved jobs](images/studio-desktop.png)
+![Create screen with timed action cards, a validated sequence timeline and the existing selected character preview](images/studio-sequence-composer.jpg)
 
-The screenshots use a completed four-second wave and a separately supplied demonstration character. Source meshes, textures, checkpoints, credentials, and generated motion files are not distributed in this repository. The visible starting-pose plan describes another possible generation; the displayed model remains the selected completed candidate until a new job and preview finish.
+The screenshots distinguish authoring a sequence from viewing a previously completed animation. The displayed model remains the selected saved candidate until a new job and preview finish. The demonstration character is separately supplied; source meshes, textures, checkpoints, credentials and generated motion files are not distributed in this repository.
 
 ## Choose an installation route
 
@@ -77,53 +77,34 @@ Browser code and Three.js are bundled locally with complete renderer and build-r
 
 The frontend source lives under `web/src`, with locked dependencies and focused tests. `npm run dev` starts Vite on loopback; its development API proxy targets port 8768. Production validation should use the actual studio server because it also applies the browser resource and request policies.
 
-## Inspect and correct the source rig
+## Move through three focused screens
 
-![Focused desktop source-rig editor showing an actual saved five-degree forearm correction](images/studio-rig-inspector.jpg)
+The workflow buttons stay available above the workspace. Start in **Create**, use **Review & fix** for an existing take, and use **Export** when its selected version is ready to leave the studio.
 
-Choose a completed animation from history and a candidate. **Source rig** displays its actual per-frame joint positions. **Fitted character** displays a separately verified GLB. The selected **Motion version** applies to diagnostics, reviews, pose anchoring, exports and editor operations. A new correction has no fitted preview until you build one; the interface never substitutes the original character preview for it.
+| Screen | Visible work | What changing screens does not do |
+| --- | --- | --- |
+| Create | Single-action form or sequence composer, saved-plan library, planning controls and the existing 3D viewer. | It does not start inference or replace the viewed motion with the new text. |
+| Review & fix | Viewer, candidate/version selection, source-rig controls, diagnostics, comparisons and verified downloads. | It does not apply staged corrections or build a character export automatically. |
+| Export | Viewer, candidate/version selection, motion conversion, Blender/Unreal actions and verified downloads. | It does not execute an editor or write an animation asset merely by opening the screen. |
 
-### See the part you need
+Changing screens preserves the current authoring draft, loaded saved plan, selected candidate/version, staged joint corrections and playback position. Selecting a different animation or version is a separate action with its own source checks. The main panel returns to its top when you switch screens; that scrolling does not seek the animation. Left/Right arrows move between workflow buttons, and Home/End select the first/last screen when a button has keyboard focus.
 
-- Click a joint, or type part of its name in **Find a joint**. Search narrows the list without hiding surrounding bones. The selected joint and connected chain are highlighted.
-- **Body region** shows an anatomical group. **Isolate selected chain** limits the viewport to the selected joint, its ancestors and descendants. Turn it off to regain full context.
-- **Joint labels** names visible joints; the selected name remains visible independently. **Camera** offers perspective, front, side and top views. **Fit view** frames the motion; drag to orbit, scroll to zoom and right-drag to pan.
-- **Focus rig editor**, on desktop widths above 1000 pixels, keeps the viewport beside the adjustment panel and temporarily hides creation/history. **Show full studio** restores them. Narrow screens stack the controls vertically.
-- With the source canvas focused, left/right arrows step one source sample, up/down select visible joints, Home/End seek the endpoints, Space toggles playback, F fits the view and Escape clears the joint selection. The joint list supports arrow keys and Home/End navigation.
+**Animation history** is a collapsible strip available in every screen. Open it to select a saved take, inspect progress or view a job log. Selecting an animation opens Review & fix; choosing its **Revise** action opens Create. Selecting the already active candidate does not discard its selected correction version. Candidate changes made inside Export remain in Export.
 
-### Make a small correction
+Success and error messages appear in a measured status area under the workflow navigation. They wrap or scroll within that area and can be dismissed; they do not float over playback or action buttons. On desktop, the creation and viewing panels scroll independently below the header. Narrow windows use a stacked document with persistent navigation. The history strip remains collapsible in both layouts.
 
-1. Pause near the problem and select a nonroot joint. Read its position and inspect the parent/child chain.
-2. Enter local X/Y/Z offsets in **degrees**. The backend receives radians in the documented X → Y → Z multiplication order. These offsets affect descendants while preserving bone lengths.
-3. Set **Original start frame**, **End frame (exclusive)** and **Blend frames per edge**. The default three-frame smoothstep taper eases the correction into and out of its window. Use a small adjustment and leave room around the problem.
-4. Choose **Stage joint correction**. Up to 16 distinct joints can be staged; staging the same joint replaces its draft settings. Remove an adjustment or use **Undo draft**, **Redo draft** and **Reset draft** as needed.
-5. Optionally expand **Trim & place the clip**. Keep an original-frame interval, change world yaw, translate X/Z, or place the retained first root at a new planar origin. Stage these settings separately; existing adjustment windows must remain inside the trim.
-6. Choose **Save & inspect new version**. The server verifies the original, computes the corrected motion and saves a separate version. The viewer switches only after successful verification. The selected joint and original-source frame remain in context where possible.
-7. Inspect the result, neighboring frames and diagnostics. Build its fitted-character preview to inspect skin deformation, then use the selected version's editor export controls.
+<details>
+<summary>View the narrow-screen sequence composer</summary>
 
-Draft controls do not pretend to update the visible motion before backend forward kinematics runs. The status explicitly distinguishes an unsaved draft from a selected saved version. Undo/redo affect the draft; **Motion version → Original motion** restores original viewing. Saved versions and source files are preserved.
+<img src="images/studio-sequence-mobile.jpg" alt="Narrow-screen sequence authoring with the three workflow buttons and editable action cards" width="340" />
 
-### Before and after
+The responsive interface remains a local desktop workflow. It does not expose the server to a phone or external network.
 
-![Isolated forearm chain showing a placed and trimmed version beside the original ghost at the same original frame](images/studio-rig-comparison.jpg)
-
-**Original ghost** overlays the original at the exact matching source frame. A trim beginning at original frame 15 maps its local frame 0 to original frame 15. The image above shows original frame 60 in a 90-frame placed/trimmed correction; the camera includes both world positions. Changing versions preserves the original-frame position where it exists in the destination range. The ghost uses actual world positions, so translation/yaw differences stay visible.
-
-The source rig may have 77 joints while the supplied fitted character has only 24 bones. Inspect finger changes on the source rig; that character cannot reproduce independent finger, facial, hair or cloth motion. Effective joint corrections invalidate predicted contact labels. An unavailable contact diagnostic is expected and is not evidence that feet are planted. These controls do not alter rest-bone lengths, hierarchy or skin weights and do not automatically solve anatomy or contacts.
-
-### Downloads and MCP parity
-
-The download list stays tied to the exact candidate/version and keeps verified conversion results after refresh. Labels distinguish character mesh FBX, character/skeleton animation FBX, Blender projects, edited NPZ, and BVH rest-pose options. Build a new preview when the selected version has no verified character export. Trimming updates displayed timing and handoff validation.
-
-All correction operations are also available to assistants: `inspect_motion_rig`, `create_motion_variant`, `get_motion_variant`, the `variant_edit` schema and `correct-motion` recipe. The same `variant_id` selects source data through inspection, assessment, comparison, pose reuse, conversion and editor handoffs. Browser camera and layout controls remain presentation settings. See [exact MCP examples](rig-corrections.md).
-
-![Narrow-screen joint browser and correction controls](images/studio-rig-narrow.jpg)
-
-The interface was checked at a 390-pixel viewport without horizontal document overflow. This remains a local desktop workflow; responsive layout does not expose the server to a phone or external network.
+</details>
 
 ## Describe and plan
 
-Use the creation panel to describe a complete physical action. Include pace, direction, and relevant starting conditions:
+Choose **Create** to describe a complete physical action. Include pace, direction, and relevant starting conditions:
 
 > A person stands in place and slowly waves with the right hand.
 
@@ -137,13 +118,22 @@ For one action, select 0.2–10 seconds, one to four candidates, and the generat
 
 These are compute presets, not guaranteed quality levels. A low-step preset still loads the text encoder.
 
-**Preview the plan** shows exact frame count, seed, sampling steps, candidate count, and notes. No inference begins. When the studio's seed is blank, it chooses a fresh integer and shows it after planning. Generating from that unchanged form retains the displayed seed. Direct MCP briefs use seed zero by default.
+**Preview the plan** shows exact frame count, seed, sampling steps, candidate count, and notes. Expand the plan details for transition and constraint-density guidance. No inference begins. When a new draft's seed is blank, the studio chooses a fresh integer and shows it after planning. Generating from that unchanged form retains the displayed seed. Direct MCP briefs use seed zero by default.
+
+The plan is a timing and settings preview. It does not animate the new text in the 3D viewport; that viewport continues showing the selected saved animation. Editing the draft invalidates the old validation until you preview again. Responses from an earlier asynchronous check do not replace a newer draft.
 
 Planning preserves the text as written. Kimodo interprets the action during generation; the bridge itself does not contain a separate natural-language parser that invents choreography, discovers a new character rig, or turns “make it better” into precise edits.
 
 ### Timed sequences
 
-Enable **Sequence of timed actions** to author two to eight beats. Each beat contains its own description and 0.2–10-second duration. The overall description becomes scene context; the individual beats are the model prompts.
+Enable **Sequence of timed actions** to author two to eight beats. Each action card contains a complete description and a requested duration of 0.2–10 seconds. **Sequence notes · not a motion prompt** records your authoring context; those notes are not silently prepended to the action prompts.
+
+1. Start with your own actions or select an editable starting point: **Approach → greet → settle**, **Crouch → jump → land**, or **Turn → walk → stop**. **Apply starter · replace actions** replaces the current cards, so use it deliberately.
+2. Click a card summary or its numbered timeline segment to edit that action. Keep its starting pose, pace, direction and any persistent object clear.
+3. Use the up/down controls to reorder a card, duplicate it to create a related action, or remove it. **+ Add action** inserts a new blank card. These controls preserve each remaining card's text and duration.
+4. Enter requested seconds. The timeline immediately shows estimated frame allocations and total duration. Preview the plan to obtain authoritative backend timing and advisories.
+
+For example:
 
 | Beat | Example | Duration |
 | --- | --- | ---: |
@@ -151,11 +141,29 @@ Enable **Sequence of timed actions** to author two to eight beats. Each beat con
 | 2 | A person slows down and comes to a stop. | 2 seconds |
 | 3 | A person stands in place and waves with the right hand. | 3 seconds |
 
-The interface shows total duration and the plan records whole-frame timing at 30 FPS. The single-action duration field is disabled in sequence mode. Timing remains authored explicitly; transitions can affect the performance near boundaries.
+At 30 FPS the example has `[90, 60, 90]` frames. The action cards display inclusive visible sample ranges `0–89`, `90–149` and `150–239`; the API expresses the same ranges with exclusive ends `[0,90)`, `[90,150)` and `[150,240)`. Each duration is quantized separately using `int(seconds × 30)`. A displayed rounded duration is not a substitute for the validated frame allocation. The single-action duration field is disabled in sequence mode.
+
+After validation, shaded tails identify samples in an earlier action that the next action revisits. With the default five-frame transition, the second action generates history for frames `85–89` before its own `90–149` allocation; the third revisits `145–149`. Each requested action keeps its frame count. Transition history does not predict when the movement will visually settle or guarantee a seamless change of action. See [saved-plan timing](saved-animation-plans.md#read-the-timeline-precisely) for the upstream behavior.
+
+### Save and reuse the complete plan
+
+Open **Reusable plans**, enter a meaningful **Plan title** and choose **Validate & save version**. The studio validates the draft and saves the exact returned request. No generation begins. The library is shared with MCP clients using the same data directory.
+
+**Refresh library** loads a page of up to 20 saved summaries. Use **Previous page** and **Next page**, select a version and choose **Load selected plan**. Invalid records are counted and excluded, rather than loaded silently. Regular job polling does not repeatedly rescan the full plan library.
+
+Loading restores the full request, including settings the simple form does not expose: model, custom sampling steps, both guidance weights, transition length, first heading, root margin, postprocessing, formats, BVH convention and complete constraint arrays. The loaded-request note shows the actual steps and constraint count. A displayed detail preset is only a label until you deliberately choose a different preset; untouched custom steps remain preserved.
+
+Edit only what you intend to change, preview, and save a new version. The original remains available and the child retains its parent-plan identity. Merely reloading an unchanged version does not create another saved record. Changing a title or sequence notes changes authoring metadata without silently changing model prompts. Clearing a previously fixed seed requires a fresh preview and saved version before generation.
+
+Text-only replacement actions preserve constraints when every action retains its quantized frame count. If an allocation changes, the studio explains the conflict. Restore the timing, deliberately select **Clear saved pose/path constraints in this revision**, or rebuild the constraints in an explicit MCP request. The checkbox clears all saved constraints; it does not stretch or remap them. Equal total duration is not enough if an internal boundary moves.
+
+**Generate saved plan** becomes available for the unchanged saved request. It is the separate inference step. Unsaved edits must be saved as a new version first. **Start a new brief** keeps the visible action text but detaches saved constraints and advanced request settings; use it only when you want a fresh brief.
+
+These controls call `save_animation_plan`, `get_animation_plan`, `list_animation_plans`, `revise_animation_plan` and `generate_animation_plan`. Read the [saved animation plan guide](saved-animation-plans.md) for immutable IDs, hashes, request preservation and reproducibility limits.
 
 ## Generate and manage jobs
 
-**Generate animation** submits a durable job and returns immediately. The right-hand history shows its saved description, duration, candidate count, seed, status, and current worker stage.
+**Generate animation**, **Generate revision** or **Generate saved plan** submits a durable job and returns immediately. Expand **Animation history**, the strip available in every workflow screen, to see saved descriptions, durations, candidate counts, seeds, status and the current worker stage. Collapse it when you want more workspace.
 
 | State | Meaning |
 | --- | --- |
@@ -177,22 +185,22 @@ All clients using the same data directory share job history. GPU work is seriali
 
 ### Revise an existing request
 
-Select **Revise** on a saved job. The form loads its existing description/beats and settings. Edit the fields you intend to change; unchanged settings remain preserved, including original values that differ from a preset's default step count.
+Select **Revise** on a saved job. The studio switches to Create and loads its existing description/beats and settings. Edit the fields you intend to change; unchanged settings remain preserved, including original values that differ from a preset's default step count.
 
 **Preview the plan** previews the revision. **Generate revision** creates a new job with parent-job context. The original request and artifacts remain available. Rewriting a prompt generates a new performance; unmentioned limbs are not guaranteed to remain identical.
 
-For multi-beat work, edit the explicit beats. If timing changes conflict with existing constraints, the server refuses to silently move them. Use a deliberate constraint-clearing revision or a new structured request through the MCP interface.
+For multi-beat work, edit the explicit beats. Text changes preserve constraints when each beat retains its frame allocation. If a boundary changes, the server refuses to silently move anchors. Use the visible constraint-clearing control deliberately or supply rebuilt constraints through a new structured MCP request.
 
 ### Start from the current pose
 
-1. Select a completed SOMA candidate with its matching loaded character preview.
+1. In Review & fix, select a completed SOMA candidate/version with its matching source rig or fitted-character preview.
 2. Pause or scrub to the desired pose.
-3. Open **Starting pose & reproducibility** and enable **Start from the current pose**.
+3. Return to Create, open **Starting pose & reproducibility**, and enable **Start from the current pose**. The selected version and viewing time remain available.
 4. Describe a new action and preview the plan.
 
-The checkbox is available only for new generation with a completed, matching source preview. It is disabled while revising to avoid mixing two editing models.
+The checkbox is available only for a new brief with a completed, matching source preview. It is disabled while revising or working from a loaded saved plan. Once an anchored request is saved, its exact numeric constraints remain in that saved plan.
 
-The chosen source frame is rounded from playback time × recorded FPS and clamped to the valid zero-based range. Source frame 60 at 30 FPS is two seconds into the original motion. The server resolves and verifies the original NPZ and adds a destination-frame-zero anchor; it does not extract pose data from rendered screen pixels.
+The chosen source frame is rounded from playback time × recorded FPS and clamped to the selected version's valid zero-based range. Source frame 60 at 30 FPS is two seconds into that clip. The server resolves and verifies the selected NPZ and adds a destination-frame-zero anchor; it does not extract pose data from rendered screen pixels. A trimmed version's local frame zero is its first retained source frame.
 
 Pose, hand/foot orientations, heading, and world root position are retained as described by the anchor contract. Velocity continuity and seamless blending are not guaranteed. See [pose reuse](natural-workflow.md#reuse-a-selected-pose) for full-body/limb constraints and representation limits.
 
@@ -236,9 +244,49 @@ Use actual absolute local paths. `preview_glb` optionally supplies an opening pr
 
 For generic skeleton work, use Kimodo NPZ reviews and the SOMA BVH handoff. Extending fitting to another character requires deliberate implementation and visual validation of that rig, rest pose, proportions, and weights.
 
+## Inspect and correct the source rig
+
+![Review and fix screen with the selected source skeleton and correction controls](images/studio-workflow-review.jpg)
+
+Choose **Review & fix**, open **Animation history** and select a completed animation and candidate. **Source rig** displays its actual per-frame joint positions. **Fitted character** displays a separately verified GLB. The selected **Motion version** applies to diagnostics, reviews, pose anchoring, exports and editor operations. A new correction has no fitted preview until you build one; the interface never substitutes the original character preview for it.
+
+### See the part you need
+
+- Click a joint, or type part of its name in **Find a joint**. Search narrows the list without hiding surrounding bones. The selected joint and connected chain are highlighted.
+- **Body region** shows an anatomical group. **Isolate selected chain** limits the viewport to the selected joint, its ancestors and descendants. Turn it off to regain full context.
+- **Joint labels** names visible joints while suppressing intersecting labels and prioritizing the selected joint. Labels stay inside the viewport; oversized names are shortened to fit, with full names available in the joint browser. **Camera** offers perspective, front, side and top views. **Fit view** frames the motion; drag to orbit, scroll to zoom and right-drag to pan.
+- **Focus rig editor**, on desktop widths above 1000 pixels, keeps the viewport beside the adjustment panel within Review & fix. **Exit rig focus** returns to the regular Review layout. Animation history stays reachable; use the workflow buttons to return to Create or Export. Narrow panels stack adjustment controls instead of squeezing them into overlapping columns.
+- With the source canvas focused, left/right arrows step one source sample, up/down select visible joints, Home/End seek the endpoints, Space toggles playback, F fits the view and Escape clears the joint selection. The joint list supports arrow keys and Home/End navigation.
+
+### Make a small correction
+
+1. Pause near the problem and select a nonroot joint. Read its position and inspect the parent/child chain.
+2. Enter local X/Y/Z offsets in **degrees**. The backend receives radians in the documented X → Y → Z multiplication order. These offsets affect descendants while preserving bone lengths.
+3. Set **Original start frame**, **End frame (exclusive)** and **Blend frames per edge**. The default three-frame smoothstep taper eases the correction into and out of its window. Use a small adjustment and leave room around the problem.
+4. Choose **Stage joint correction**. Up to 16 distinct joints can be staged; staging the same joint replaces its draft settings. Remove an adjustment or use **Undo draft**, **Redo draft** and **Reset draft** as needed.
+5. Optionally expand **Trim & place the clip**. Keep an original-frame interval, change world yaw, translate X/Z, or place the retained first root at a new planar origin. Stage these settings separately; existing adjustment windows must remain inside the trim.
+6. Choose **Save & inspect new version**. The server verifies the original, computes the corrected motion and saves a separate version. The viewer switches only after successful verification. The selected joint and original-source frame remain in context where possible.
+7. Inspect the result, neighboring frames and diagnostics. Build its fitted-character preview to inspect skin deformation, then use the selected version's editor export controls.
+
+Draft controls do not pretend to update the visible motion before backend forward kinematics runs. The status explicitly distinguishes an unsaved draft from a selected saved version. Undo/redo affect the draft; **Motion version → Original motion** restores original viewing. Saved versions and source files are preserved.
+
+### Before and after
+
+![Isolated forearm chain showing a placed and trimmed version beside the original ghost at the same original frame](images/studio-rig-comparison.jpg)
+
+**Original ghost** overlays the original at the exact matching source frame. A trim beginning at original frame 15 maps its local frame 0 to original frame 15. The image above shows original frame 60 in a 90-frame placed/trimmed correction; the camera includes both world positions. Changing versions preserves the original-frame position where it exists in the destination range. The ghost uses actual world positions, so translation/yaw differences stay visible.
+
+The source rig may have 77 joints while the supplied fitted character has only 24 bones. Inspect finger changes on the source rig; that character cannot reproduce independent finger, facial, hair or cloth motion. Effective joint corrections invalidate predicted contact labels. An unavailable contact diagnostic is expected and is not evidence that feet are planted. These controls do not alter rest-bone lengths, hierarchy or skin weights and do not automatically solve anatomy or contacts.
+
+### Downloads and MCP parity
+
+The download list stays tied to the exact candidate/version and keeps verified conversion results after refresh. Labels distinguish character mesh FBX, character/skeleton animation FBX, Blender projects, edited NPZ, and BVH rest-pose options. Build a new preview when the selected version has no verified character export. Trimming updates displayed timing and handoff validation.
+
+All correction operations are also available to assistants: `inspect_motion_rig`, `create_motion_variant`, `get_motion_variant`, the `variant_edit` schema and `correct-motion` recipe. The same `variant_id` selects source data through inspection, assessment, comparison, pose reuse, conversion and editor handoffs. Browser camera and layout controls remain presentation settings. See [exact MCP examples](rig-corrections.md).
+
 ## Inspect and compare motion
 
-The detail panel shows duration, frame count, seed, and selected diagnostics. **Open frame review** opens a standalone report with the exact source poses, fixed full-clip camera bounds, front/side/three-quarter views, and a contact sheet combining timeline samples with diagnostic extrema.
+In **Review & fix**, the detail panel shows duration, frame count, seed, and selected diagnostics. **Open frame review** opens a standalone report with the exact source poses, fixed full-clip camera bounds, front/side/three-quarter views, and a contact sheet combining timeline samples with diagnostic extrema.
 
 ![Actual motion review at source frame 60, with three fixed views and exact timing](images/motion-review.png)
 
@@ -262,7 +310,7 @@ See [motion review](animate-review.md) for metric definitions, canonical hashes,
 
 ## Download or send to an editor
 
-The download row lists only verified files available for the selected job/sample:
+Choose **Export** to work with the selected candidate and motion version. The viewer remains available as a reference, while authoring and correction forms are hidden. Switching to this screen does not convert files or run an editor. Downloads are also visible in Review & fix and list only verified files available for the selected job/sample/version:
 
 | File | Purpose |
 | --- | --- |
@@ -283,7 +331,7 @@ The tested editor connection is [Blender Lab MCP](https://www.blender.org/lab/mc
 
 ### Unreal
 
-In **Send to an editor**, configure all five target fields:
+In **Export**, expand **Unreal Engine** and configure all five target fields:
 
 | Field | Example |
 | --- | --- |
@@ -359,6 +407,6 @@ The browser resource policy allows local scripts/styles and embedded GLB image r
 | Changed artifact no longer appears | Treat it as a provenance failure; inspect the source/export rather than assuming the old receipt still applies. |
 | Revision rejects timing | Preserve timing or explicitly revise/clear constraints through the structured workflow. |
 
-Live validation used actual API responses and the real GLB: textured rendering, camera/timeline controls, preserved revisions, pose-anchor planning, timed beats, diagnostics, comparison, downloaded NPZ checksum, worker logs, Blender receipt reuse, and a saved Unreal import. Desktop and narrow layouts were visually inspected with no browser console or page errors.
+Earlier live integration validation used actual API responses and the real GLB: textured rendering, camera/timeline controls, preserved revisions, pose-anchor planning, timed beats, diagnostics, comparison, downloaded NPZ checksum, worker logs, Blender receipt reuse, and a saved Unreal import. Desktop and narrow layouts were visually inspected with no browser console or page errors.
 
-The publication checks reused a completed motion and did not submit fresh inference under insufficient available memory. The separately verified queue/cancel path stopped before model inference. Neither a valid plan nor a connected worker is evidence that a new animation has finished.
+The publication checks reused a completed motion and did not submit fresh inference under insufficient available memory. The separately verified queue/cancel path stopped before model inference. The sequence-composer screenshots illustrate authoring and review of existing outputs; they are not evidence of a newly generated multi-beat performance or a new editor execution. Neither a valid plan nor a connected worker is evidence that a new animation has finished.

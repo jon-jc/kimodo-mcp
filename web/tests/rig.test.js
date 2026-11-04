@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { adjustmentFromControls, artifactLabel, beforeFrame, bodyGroup, canEditRig, DraftHistory, freshEdit, jointChain, placementFromControls, previewDataUrl, selectedDownloads, selectedPreview, sourceBounds, sourceKey, upsertAdjustment, validatePreviewData, variantArgs, viewerFilters, visibleJoints } from '../src/rig-data.js';
+import { adjustmentFromControls, artifactLabel, beforeFrame, bodyGroup, canEditRig, DraftHistory, freshEdit, jointChain, layoutJointLabels, placementFromControls, previewDataUrl, selectedDownloads, selectedPreview, sourceBounds, sourceKey, upsertAdjustment, validatePreviewData, variantArgs, viewerFilters, visibleJoints } from '../src/rig-data.js';
 
 const job = 'a'.repeat(32), hash = 'b'.repeat(64), variant = 'c'.repeat(64), changedHash = 'd'.repeat(64);
 function fixture() {
@@ -138,4 +138,38 @@ test('verified downloads distinguish meshes, character and skeleton animations, 
   assert.equal(artifactLabel({ role: 'animation', source_kind: 'skeleton', format: 'fbx' }), 'Skeleton animation FBX');
   assert.equal(artifactLabel({ format: 'bvh', options: { bvh_standard_tpose: true } }), 'BVH · standard T-pose');
   assert.equal(artifactLabel({ role: 'motion_variant', variant_id: variant }), 'Edited motion NPZ · version cccccccc');
+});
+
+test('crowded joint labels retain selection first and never overlap', () => {
+  const candidates = Array.from({ length: 77 }, (_, index) => ({ index, x: 150, y: 100, width: 80, height: 20 }));
+  const snapshot = structuredClone(candidates), placed = layoutJointLabels(candidates, 300, 200, 65);
+  assert.equal(placed[0].index, 65);
+  assert.ok(placed.length < candidates.length);
+  assert.deepEqual(candidates, snapshot);
+  assert.deepEqual(layoutJointLabels(candidates, 300, 200, 65), placed);
+  for (const [index, first] of placed.entries()) for (const second of placed.slice(index + 1)) {
+    assert.ok(first.left + first.width + 3 <= second.left || second.left + second.width + 3 <= first.left
+      || first.top + first.height + 3 <= second.top || second.top + second.height + 3 <= first.top);
+  }
+});
+
+test('edge labels clamp their complete text box inside the viewer', () => {
+  for (const [x, y] of [[0, 0], [100, 0], [0, 80], [100, 80]]) {
+    const [placed] = layoutJointLabels([{ index: 0, x, y, width: 60, height: 20 }], 100, 80, 0);
+    assert.ok(placed.left >= 4 && placed.top >= 4);
+    assert.ok(placed.left + placed.width <= 96 && placed.top + placed.height <= 76);
+  }
+  const [long] = layoutJointLabels([{ index: 0, x: 50, y: 40, width: 300, height: 90 }], 100, 80, 0);
+  assert.deepEqual(long, { index: 0, left: 4, top: 4, width: 92, height: 72 });
+});
+
+test('label placement recalculates for a hidden or resized container without stale boxes', () => {
+  const candidates = [{ index: 0, x: 20, y: 20, width: 60, height: 20 },
+    { index: 1, x: 80, y: 20, width: 60, height: 20 }];
+  assert.deepEqual(layoutJointLabels(candidates, 0, 100), []);
+  assert.deepEqual(layoutJointLabels(candidates, 100, 0), []);
+  assert.equal(layoutJointLabels(candidates, 100, 100).length, 1);
+  const wider = candidates.map(item => ({ ...item, x: item.x * 4 }));
+  assert.equal(layoutJointLabels(wider, 400, 100).length, 2);
+  assert.deepEqual(layoutJointLabels([{ index: 0, x: NaN, y: 5, width: 20, height: 10 }], 100, 100), []);
 });

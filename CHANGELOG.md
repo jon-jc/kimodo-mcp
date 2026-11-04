@@ -2,6 +2,31 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-03 — Focused studio workflow, sequence composer and layout repairs
+
+### Added
+
+- Persistent **Create**, **Review & fix** and **Export** work areas expose the tools needed for each stage. Navigation preserves the authoring draft, loaded plan, candidate, correction version, staged joint edits and playback position. Animation history is a collapsible strip available throughout the workflow.
+- An action-card sequence composer supports two to eight independently described beats, keyboard-accessible reordering, duplication, removal and timeline selection. Three editable starters provide approach/greet/settle, crouch/jump/land and turn/walk/stop sequences. Applying a starter explicitly replaces the visible actions.
+- The timeline distinguishes estimated allocations from server-validated frame ranges. Shaded tails identify preceding samples revisited by the next action; they do not remove the requested next-action frames. Timing previews explicitly identify the 3D view as an existing saved animation.
+- A paginated reusable-plan library shares complete requests with MCP clients. Loading retains custom sampling settings, model identity, metadata, constraints and export options. Deliberate changes save an immutable child version; unchanged loaded plans generate through their saved identity. Blank-seed revisions must resolve a new seed before saving.
+- Updated README and studio guide explain the complete three-stage workflow with actual desktop, rig-review and narrow-screen screenshots.
+
+### Fixed
+
+- Replaced overlapping desktop layout rules with measured header/navigation rows, independently scrolling creation/view panels, a separate history strip and stacked narrow-screen layouts. Status messages occupy a bounded layout area instead of covering playback and action buttons.
+- Hardened wrapping and minimum widths for action buttons, version selection, rig corrections, frame fields, download links and editor settings. Sequence authoring uses compact notes and a wider desktop column; mobile export controls no longer reserve an unnecessary vertical gap.
+- Rig labels prioritize the selected joint, choose available left/right positions, remain inside the viewport and suppress crowded neighbors. Resizing recalculates placement; long labels truncate with the full name available in a tooltip.
+- Selecting the current candidate retains its correction version. Switching workflow areas retains playback time; changing between matching source and fitted representations transfers the nearest source frame. Mobile navigation returns to the active screen's top without seeking playback.
+- Stale preview, plan-load and library-list responses cannot replace newer authoring state. Late generation/retry responses cannot replace a candidate explicitly selected while submission was pending, including selecting another source and returning to the original.
+- Saved-plan text edits preserve anchored constraints at unchanged frame allocations. Changed allocations display a plain explanation and require explicit clearing; a successful later preview dismisses the earlier error. Advanced custom sampling values remain unchanged until their control is deliberately changed.
+
+### Validation and scope
+
+- All 43 frontend tests pass, covering composer identity/order/limits, exact timing, advanced saved-request routes, metadata preservation, blank-seed handling, stale-response gates, workflow state, shared-frame transfer and collision-free label placement. The production build and syntax checks pass.
+- Browser checks exercised shared-plan loading, text-only revision/save, timing-conflict rejection, explicit constraint-clearing preview, seed reset, candidate/version retention, workflow switching, responsive controls and actual rig labels. A fresh MCP session independently verified that the UI-saved child retained custom 37-step sampling, seven transition frames and its root constraint while changing only the intended prompt.
+- These changes were tested against saved animations. No inference worker was started, new generation submitted, Blender conversion executed or Unreal import performed for this delivery. The UI improves authoring and inspection; visual motion quality, contacts, deformation and engine acceptance still require review of generated results.
+
 ## 2026-11-03 — Saved animation plans and constraint-preserving beat revisions
 
 ### Added
