@@ -36,9 +36,30 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | FreeMoCap capture | Check and synchronize videos, import a take, calibrate cameras, track detailed landmarks, inspect saved results and explicitly export through Blender using shared Studio/MCP controls. |
 | Capture cleanup and character delivery | Trim verified FreeMoCap BVH, smooth selected windows, apply local joint offsets, review the fitted character and prepare a separate Unreal animation import. |
 | Native Kimodo controls | Choose all nine reviewed models, exact sampling/guidance settings, root paths, pose constraints and export flags; explicitly open the original workspace for its complete visual tools. |
-| MCP interface | Use 80 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| Model assets and props | Import immutable models, preview them and attach static props to verified character animation with saved placements and recoverable builds. |
+| UniRig rigging | Use released preprocessing, skeleton, skin and merge stages through the same Studio/MCP asset library; review generated rigs before separate retargeting. |
+| Complete tool controls | Browse live tool contracts, ordered recipes and upstream coverage in Workflow & tools; run exact validated arguments from Studio. |
+| MCP interface | Use 103 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
-**Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
+**Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. The separate UniRig workflow predicts general asset skeletons and skin weights, but does not automatically map them to this fitted character or an Unreal target. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
+
+## Connected workflow, assets and rigging
+
+Open **Workflow & tools** to find every integrated operation in one place. Choose an ordered recipe, open its visual workspace, inspect a tool's exact controls or run a complete validated request. The library is generated from the live MCP registry: agents and Studio users see the same 103 operations. Optional values remain omitted unless selected, and nested settings remain available through their full JSON contracts. Recipes explain source identities, expected results and recovery; they do not run actions automatically. Read the [workflow and tool library guide](docs/workflow-toolbox.md).
+
+![Studio workflow hub with exact tool controls](docs/images/studio-workflow-tools.jpg)
+
+**Assets & props** imports GLB, FBX, OBJ and VRM into an immutable shared model library. Place up to 16 static props in the world or attach them to one of the fitted character's 24 bones. Set position in meters, local rotation and scale, save a scene, select the exact generated or cleaned-capture character export and build it in a fresh background Blender process. The output includes an animated combined GLB, a Blender scene, separate static prop FBXs and an attachment recipe. Saved scenes and build attempts can be recovered by another agent or browser. See [all model and attachment controls](docs/assets-and-props.md).
+
+![Verified character animation with prop scene playback and skeleton overlay](docs/images/studio-assets-props.jpg)
+
+The screenshot shows the existing generated wave with a synthetic blade fixture used for attachment verification. The Blender checks preserve the original character animation; they do not establish a natural grip, collision-free interaction or Unreal socket orientation. Prop import and socket creation in Unreal remain separate editor work.
+
+**Rig a model** exposes UniRig's released preprocess, skeleton, skin and merge stages, or a complete sequential pipeline. Choose 1–4 registered meshes; control seed, extraction face target, sampling, token budget, beam search, top-k/top-p, temperature, repetition penalty, skin backend, output format and root creation. Inspect a predicted skeleton, edit it in Blender and register that edited rig for a later skinning stage when needed. Completed verified GLB/FBX results can return to the asset library. The separate runtime, cached model weights and compatible GPU dependencies must be configured first. Read [setup, stage recipes and every supported UniRig control](docs/unirig.md).
+
+![UniRig Studio controls and explicit runtime readiness](docs/images/studio-unirig.jpg)
+
+The [native-control coverage matrix](docs/native-controls.md) records what is integrated from each project, what remains in its original application and what is unavailable in the reviewed release. Kimodo's original workspace remains available for its complete visual controls. The combined bridge does not claim full parity with FreeMoCap's device UI, EasyMocap's research pipelines, Animate's 2D editor, UniRig training or general Blender/Unreal scripting.
 
 ## Native controls and capture-to-character workflow
 
@@ -146,6 +167,9 @@ Configure the same environment for the worker, studio, and MCP clients:
 | `KIMODO_DATA_DIR` | Shared jobs, reports, exports, and registrations outside this repository. |
 | `KIMODO_REPO` | Absolute path to the reviewed upstream checkout. |
 | `KIMODO_PYTHON` | Absolute path to Python with Kimodo and inference dependencies. |
+| `KIMODO_UNIRIG_REPO` | Optional clean pinned UniRig source checkout; see [separate rigging setup](docs/unirig.md). |
+| `KIMODO_UNIRIG_PYTHON` | Separate Python 3.11 rigging runtime with matching native geometry and inference dependencies. |
+| `KIMODO_BLENDER` | Optional explicit Blender executable for fresh background asset previews and prop scene exports. |
 | `TEXT_ENCODER_DEVICE` | `cpu` reduces GPU use by moving the encoder into system memory. |
 | `HF_HOME` | Optional shared Hugging Face cache and local authentication directory. |
 | `KIMODO_ALLOW_DOWNLOADS` | `1` permits first-run downloads; ordinary worker startup is offline. |
@@ -355,10 +379,11 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **80 tools**, **18 workflow recipes** and **12 input schemas**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, native-job and separate video-capture state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **103 tools**, **20 workflow recipes** and **15 input schemas**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, native-job and separate video-capture state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
+| `get_tool_schema` | Read one live registered tool’s complete nested input/output contract and annotations without executing it. |
 | `get_capabilities` | Discover every registered tool, workflow, schema, model, limit, and implementation boundary. |
 | `get_workflow` | Read an ordered workflow recipe without executing any actions. |
 | `get_input_schema` | Read the complete schema for briefs, revisions, requests, pose references, diagnostics, or Unreal targets. |
@@ -420,6 +445,34 @@ The server exposes **80 tools**, **18 workflow recipes** and **12 input schemas*
 | `prepare_unreal_handoff` | Prepare animation-only import into an explicit project and existing rig. |
 | `execute_unreal_handoff` | Run the verified script in the matching editor and verify the saved animation. |
 | `get_unreal_report` | Read final asset, skeleton, timing, and track verification. |
+
+
+### Model assets, prop scenes and UniRig tools
+
+| Tool | Purpose |
+| --- | --- |
+| `import_studio_asset` | Copy a supported local model into the hash-verified shared asset library. |
+| `list_studio_assets` | Browse registered assets with bounded pagination. |
+| `get_studio_asset` | Verify source bytes and read the selected model’s metadata. |
+| `build_studio_asset_preview` | Explicitly convert a registered model into a self-contained GLB using background Blender. |
+| `get_studio_asset_preview` | Read a saved preview without starting Blender. |
+| `save_prop_scene` | Save up to 16 world placements or fitted-bone attachments. |
+| `get_prop_scene` | Verify a saved recipe and its asset references. |
+| `list_prop_scenes` | Find saved attachment scenes. |
+| `prepare_prop_scene_handoff` | Bind a scene to an exact verified generated or capture-character animation. |
+| `execute_prop_scene_handoff` | Build an animated scene and verify that character animation was preserved. |
+| `get_prop_scene_handoff` | Recover and verify a prepared or completed scene export. |
+| `list_prop_scene_handoffs` | Find shared scene export attempts. |
+| `get_prop_scene_artifact` | Resolve a verified scene, prop FBX or attachment recipe. |
+| `get_unirig_capabilities` | Read released stages, configured runtime requirements and limitations. |
+| `plan_unirig` | Validate registered inputs and runtime configuration without rigging. |
+| `start_unirig` | Explicitly submit a released rigging stage or pipeline. |
+| `get_unirig_job` | Read progress and verify completed output identity. |
+| `list_unirig_jobs` | Find saved rigging jobs shared across clients. |
+| `cancel_unirig_job` | Request cancellation of the selected owned job. |
+| `get_unirig_log` | Read bounded selected-job diagnostics. |
+| `get_unirig_artifact` | Verify an exact manifest-listed rigging output. |
+| `register_unirig_output` | Copy a verified rigged result into the asset library without replacing the current character. |
 
 The studio and MCP share character-preview execution and Unreal target settings. `build_character_preview` is available directly as an MCP tool; the browser calls the same operation. It chooses an unused attempt or reuses a valid receipt, and blocks automatic retries after uncertain editor dispatch. Inspect the receipt before retrying manually.
 

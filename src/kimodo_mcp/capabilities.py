@@ -19,16 +19,21 @@ from .freemocap import FreeMocapRequest
 from .handoff import UnrealTarget
 from .motion_revision import VariantRevision
 from .motion_variants import VariantEdit
+from .native_coverage import get_native_control_coverage
 from .planning import QUALITY_STEPS, AnimationBrief, AnimationRevision, PoseReference
+from .props import PropMotionSource, PropSceneRequest
 from .schemas import GenerateRequest, QualityThresholds
+from .unirig import UNIRIG_REVISION, UniRigRequest
 from .video_mocap import CAPABILITIES as VIDEO_CAPABILITIES
 from .video_mocap import VideoMocapRequest
 
 WorkflowName = Literal[
+    "asset-props", "unirig",
     "generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
     "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans", "video-mocap", "freemocap", "resume-motion", "capture-character", "native-workspace",
 ]
 SchemaName = Literal[
+    "prop_scene_request", "prop_motion_source", "unirig_request",
     "generate_request", "animation_brief", "animation_revision", "pose_reference",
     "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision", "video_mocap_request", "freemocap_request", "capture_retarget_request",
 ]
@@ -36,6 +41,9 @@ WORKFLOW_IDS = get_args(WorkflowName)
 SCHEMA_IDS = get_args(SchemaName)
 
 _SCHEMAS = {
+    "prop_scene_request": PropSceneRequest,
+    "prop_motion_source": PropMotionSource,
+    "unirig_request": UniRigRequest,
     "generate_request": GenerateRequest,
     "animation_brief": AnimationBrief,
     "animation_revision": AnimationRevision,
@@ -51,6 +59,14 @@ _SCHEMAS = {
 }
 
 _GROUPS = {
+    "asset_props": ("Import models, save placements and attach props to verified character animation",
+                    ("import_studio_asset", "list_studio_assets", "get_studio_asset",
+                     "build_studio_asset_preview", "get_studio_asset_preview", "save_prop_scene", "get_prop_scene",
+                     "list_prop_scenes", "prepare_prop_scene_handoff", "execute_prop_scene_handoff",
+                     "get_prop_scene_handoff", "get_prop_scene_artifact", "list_prop_scene_handoffs")),
+    "unirig": ("Preprocess meshes and predict skeletons and skin weights using the separate released UniRig runtime",
+               ("get_unirig_capabilities", "plan_unirig", "start_unirig", "get_unirig_job", "list_unirig_jobs",
+                "cancel_unirig_job", "get_unirig_log", "get_unirig_artifact", "register_unirig_output")),
     "native_workspace": ("Open all original native Kimodo UI capabilities in a separate local session",
                          ("get_native_workspace", "start_native_workspace", "stop_native_workspace")),
     "capture_character": ("Clean up and retarget verified capture exports onto the registered character",
@@ -71,7 +87,7 @@ _GROUPS = {
     ),
     "discovery": (
         "Discover capabilities and workspace readiness",
-        ("get_capabilities", "get_workflow", "get_input_schema", "list_models", "health_check",
+        ("get_capabilities", "get_tool_schema", "get_workflow", "get_input_schema", "list_models", "health_check",
          "get_workspace_state", "get_character_profile", "get_unreal_target", "list_motion_sources"),
     ),
     "generation": (
@@ -625,6 +641,52 @@ _RECIPES = {
 
 
 _RECIPES.update({
+    "asset-props": {
+        "title": "Import game assets and attach them to character animation",
+        "inputs": {"asset_path": "Absolute local GLB, FBX, OBJ or VRM path.", "asset_label": "Readable library label.",
+                   "prop_scene": "PropSceneRequest with actual registered asset IDs and explicit transforms.",
+                   "prop_motion": "PropMotionSource selecting a verified completed fitted-character handoff."},
+        "requirements": ["Import preserves original bytes; external material sidecars are not bundled.",
+                         "Preview/export requires installed Blender; attachment source must match the registered character."],
+        "steps": [
+            _step("library", "list_studio_assets", "Find existing models before importing a duplicate."),
+            _step("import_asset", "import_studio_asset", "Store a verified immutable source model.",
+                  arguments_from={"source_path": "input.asset_path", "label": "input.asset_label"}),
+            _step("preview_asset", "build_studio_asset_preview", "Convert and inspect the model's geometry and materials.",
+                  arguments_from={"asset_id": "steps.import_asset.asset_id"}),
+            _step("scene", "save_prop_scene", "Save bounded world/bone placements without changing character keys.",
+                  arguments_from={"request": "input.prop_scene"}),
+            _step("prepare", "prepare_prop_scene_handoff", "Bind scene to the exact verified source animation.",
+                  arguments_from={"scene_id": "steps.scene.scene_id", "source": "input.prop_motion"}),
+            _step("build", "execute_prop_scene_handoff", "Export in fresh Blender and verify unchanged character animation.",
+                  arguments_from={"handoff_id": "steps.prepare.handoff_id"},
+                  on_failure="Read existing status; never repeat unresolved dispatch automatically."),
+            _step("review", "get_prop_scene_handoff", "Review animated GLB, separate prop FBXs and attachment recipe.",
+                  arguments_from={"handoff_id": "steps.prepare.handoff_id"}),
+        ],
+        "completion": "Verified animated scene and separate prop outputs; source animation remains unchanged.",
+        "notes": ["World transforms use Blender Z-up meters; bone attachments use posed bone-head axes.",
+                  "No prop bones are added to the character. Unreal socket basis conversion and import remain explicit editor tasks."],
+    },
+    "unirig": {
+        "title": "Predict and review a skeleton and skin weights for registered models",
+        "inputs": {"unirig_request": "UniRigRequest with actual asset IDs and one released operation."},
+        "requirements": ["Separate installed UniRig runtime and clean pinned checkout; model access and GPU readiness remain separate.",
+                         "Batch inputs must be registered immutable model assets; no arbitrary task/config paths."],
+        "steps": [
+            _step("capabilities", "get_unirig_capabilities", "Inspect released stages and setup boundaries."),
+            _step("plan", "plan_unirig", "Verify source identities and stage-specific runtime configuration.",
+                  arguments_from={"request": "input.unirig_request"}),
+            _step("submit", "start_unirig", "Explicitly create a durable rigging job after reviewing its plan.",
+                  arguments_from={"request": "input.unirig_request"}, when="The plan is ready and execution is intended."),
+            _step("result", "get_unirig_job", "Poll until completed with a verified output manifest and no verification_error.",
+                  arguments_from={"job_id": "steps.submit.id"},
+                  on_failure="Inspect bounded logs and setup; retries create separate jobs and preserve old evidence."),
+        ],
+        "completion": "Verified stage outputs are available for visual rig/deformation review and optional library registration.",
+        "notes": ["A generated rig is not an animation or an automatic mapping to SOMA, Manny or the registered character.",
+                  "Training and benchmarks are separate operator workflows; unreleased checkpoints and bone physics are not advertised as callable tools."],
+    },
     "native-workspace": {
         "title": "Use the complete original Kimodo interface",
         "inputs": {"model": "Exact generation model ID from list_models."},
@@ -721,6 +783,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
         groups.append({"id": "other", "title": "Additional registered operations", "tools": extra})
     return {
         "schema_version": 1, "reviewed_revision": UPSTREAM_REVISION,
+        "native_control_coverage": get_native_control_coverage(),
         "tool_count": len(by_name), "tools": [by_name[name] for name in sorted(by_name)], "tool_groups": groups,
         "models": list_models(),
         "source_families": {
@@ -746,6 +809,15 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
         "video_mocap": {"request_schema": "video_mocap_request", "workflow": "video-mocap",
                         "separate_job_namespace": True, "bvh_units": "meters", "skeleton": "smpl24",
                         "space": "camera-relative", "scale": "estimated", **deepcopy(VIDEO_CAPABILITIES)},
+        "assets": {"workflow": "asset-props", "formats": ["glb", "fbx", "obj", "vrm"],
+                   "max_asset_bytes": 512 * 1024**2, "max_attachments": 16,
+                   "immutable": True, "attachment_world_up": "Z", "units": "meters",
+                   "unreal_socket_conversion_verified": False},
+        "unirig": {"workflow": "unirig", "request_schema": "unirig_request", "reviewed_revision": UNIRIG_REVISION,
+                   "operations": ["preprocess", "skeleton", "skin", "merge", "pipeline"],
+                   "separate_runtime": True, "automatic_character_registration": False,
+                   "training_and_benchmarks": "Separate operator workflows; not exposed as arbitrary tasks.",
+                   "bone_physics_attributes": "Unreleased in the reviewed source."},
         "schemas": [{"id": name, "title": model.__name__, "uri": f"kimodo://schemas/{name}"}
                     for name, model in _SCHEMAS.items()],
         "workflows": [{"id": name, "title": recipe["title"], "uri": f"kimodo://workflows/{name}"}
@@ -753,7 +825,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
         "entry_points": {"capabilities": "get_capabilities", "readiness": "get_workspace_state",
                          "natural_brief": "plan_animation", "advanced_request": "validate_motion",
                          "saved_request": "save_animation_plan",
-                         "schema": "get_input_schema", "workflow": "get_workflow"},
+                         "schema": "get_input_schema", "tool_schema": "get_tool_schema", "workflow": "get_workflow"},
         "coordinates": {"native_units": "meters", "up": "+Y", "forward": "+Z", "ground_plane": "XZ",
                         "frame_index_base": 0, "nominal_fps": 30, "bvh_units": "centimeters",
                         "timing": "N samples play for N/fps seconds; the first-to-last key span is (N-1)/fps."},
@@ -807,11 +879,11 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
             "The studio and MCP share job state, target settings and character-preview execution. Viewer camera/playback controls belong to the browser interface.",
         ],
         "unsupported": [
-            "Mesh generation or arbitrary character auto-rigging; the supplied character fit is asset-specific.",
+            "Mesh generation and automatic character retargeting; UniRig rigging is an explicit separate workflow and the fitted character remains asset-specific.",
             "Facial animation, independent finger animation, cloth/hair physics or collision simulation in the fitted-character workflow.",
             "General cross-rig retargeting (the verified FreeMoCap BVH to fitted-character workflow is an explicit exception), seamless stitching, velocity matching, arbitrary resampling or automatic contact repair.",
             "Initial Unreal skeletal-mesh import through this server; use the editor's import tools first.",
-            "Arbitrary external file import/conversion, training, benchmark execution or general video/audio rendering; managed NPZ export, bounded video capture and contained explicit FreeMoCap stages are exceptions.",
+            "Arbitrary external file import/conversion, training, benchmark execution or general video/audio rendering; bounded model asset import, UniRig stages, managed NPZ export and capture workflows are explicit exceptions.",
             "Arbitrary code execution or file read/write, dependency installation or general worker/editor startup; the fixed owned native workspace and explicit Unreal targets are bounded exceptions.",
             "Public remote hosting or multi-user authorization.",
         ],

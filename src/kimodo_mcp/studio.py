@@ -19,6 +19,8 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
+from .asset_api import TOOL_NAMES as ASSET_TOOL_NAMES
+from .asset_api import asset_routes
 from .capacity import capacity_snapshot, editor_connections
 from .capture_retarget_api import TOOL_NAMES as CAPTURE_RETARGET_TOOL_NAMES
 from .capture_retarget_api import capture_retarget_routes
@@ -27,6 +29,8 @@ from .freemocap_api import TOOL_NAMES as FREEMOCAP_TOOL_NAMES
 from .freemocap_api import freemocap_routes
 from .jobs import JobStore, contained_file, redact
 from .server import create_server
+from .unirig_api import TOOL_NAMES as UNIRIG_TOOL_NAMES
+from .unirig_api import unirig_routes
 from .video_api import TOOL_NAMES as VIDEO_TOOL_NAMES
 from .video_api import video_routes
 from .workspace import DOWNLOAD_PATH as _DOWNLOAD
@@ -34,6 +38,7 @@ from .workspace import Workspace
 
 _MAX_BODY = 1024 * 1024
 _ACTIONS = {
+    "get_tool_schema", "get_job", "list_jobs", "get_artifact",
     "list_motion_sources",
     "get_native_workspace",
     "start_native_workspace",
@@ -87,6 +92,8 @@ _ACTIONS = {
     *VIDEO_TOOL_NAMES,
     *FREEMOCAP_TOOL_NAMES,
     *CAPTURE_RETARGET_TOOL_NAMES,
+    *ASSET_TOOL_NAMES,
+    *UNIRIG_TOOL_NAMES,
 }
 
 
@@ -308,6 +315,8 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
             *video_routes(settings, csrf),
             *freemocap_routes(settings),
             *capture_retarget_routes(settings),
+            *asset_routes(settings, csrf),
+            *unirig_routes(settings),
             Route("/{path:path}", web),
         ]
     )

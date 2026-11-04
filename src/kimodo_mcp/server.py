@@ -21,6 +21,7 @@ from .animation_plans import AnimationPlanStore, PlanDescription, PlanId, PlanTi
 from .artifacts import create_preview
 from .artifacts import inspect_motion as inspect_archive
 from .assessment import CandidateReference, QualityPolicy
+from .asset_api import register_asset_tools
 from .capabilities import (
     SchemaName,
     WorkflowName,
@@ -48,6 +49,7 @@ from .review import create_motion_review as create_review_file
 from .schemas import GenerateRequest, QualityThresholds
 from .source_library import SourceKind
 from .source_library import list_motion_sources as source_history
+from .unirig_api import register_unirig_tools
 from .video_api import register_video_tools
 from .video_mocap import list_video_mocap_jobs
 from .workspace import Workspace, handoff_directory_name
@@ -92,7 +94,9 @@ def create_server(
             "For FreeMoCap use explicit get_freemocap_capabilities and plan_freemocap_capture before each "
             "start_freemocap_capture stage. Single-camera output is planar, not metric 3D; asynchronous stages "
             "need the separately launched status extension. Poll the bound receipt and review actual outputs. "
-            "This server does not create meshes or automatically fit arbitrary characters."
+            "Use the asset library and prop-scene tools for models and rigid attachments. "
+            "UniRig supports explicit released rigging stages in a separate runtime; generated rigs require review "
+            "and are not automatically retargeted to the registered character or an Unreal skeleton."
         ),
         host="127.0.0.1", port=port,
     )
@@ -106,6 +110,20 @@ def create_server(
              "annotations": tool.annotations.model_dump(exclude_none=True) if tool.annotations else {}}
             for tool in tools
         ])
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_tool_schema(tool_name: str) -> dict[str, Any]:
+        """Read one registered tool's complete input/output controls and effects without executing it.
+
+        Use get_capabilities for names and get_workflow for the required order and verification.
+        The schema is taken from the live MCP registry, including nested models and bounds.
+        """
+        for tool in await mcp.list_tools():
+            if tool.name == tool_name:
+                return {"name": tool.name, "description": tool.description or "",
+                        "input_schema": tool.inputSchema, "output_schema": tool.outputSchema,
+                        "annotations": tool.annotations.model_dump(exclude_none=True) if tool.annotations else {}}
+        raise ValueError("Unknown tool; choose an exact name from get_capabilities")
 
     @mcp.tool(annotations=READ_ONLY)
     def get_workflow(workflow: WorkflowName) -> dict[str, Any]:
@@ -1065,6 +1083,8 @@ def create_server(
     register_video_tools(mcp, settings)
     register_freemocap_tools(mcp, settings)
     register_capture_retarget_tools(mcp, settings)
+    register_asset_tools(mcp, settings)
+    register_unirig_tools(mcp, settings)
     return mcp
 
 

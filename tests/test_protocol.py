@@ -12,6 +12,13 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
 EXPECTED_TOOLS = {
+    "get_tool_schema",
+    "import_studio_asset", "list_studio_assets", "get_studio_asset", "build_studio_asset_preview",
+    "get_studio_asset_preview", "save_prop_scene", "get_prop_scene", "list_prop_scenes",
+    "prepare_prop_scene_handoff", "execute_prop_scene_handoff", "get_prop_scene_handoff",
+    "get_prop_scene_artifact", "list_prop_scene_handoffs", "get_unirig_capabilities", "plan_unirig",
+    "start_unirig", "get_unirig_job", "list_unirig_jobs", "cancel_unirig_job", "get_unirig_log",
+    "get_unirig_artifact", "register_unirig_output",
     "get_native_workspace", "start_native_workspace", "stop_native_workspace",
     "list_freemocap_character_handoffs", "inspect_freemocap_retarget_source", "prepare_freemocap_character",
     "execute_freemocap_character", "get_freemocap_character", "get_freemocap_character_artifact",
