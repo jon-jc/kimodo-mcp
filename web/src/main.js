@@ -36,6 +36,13 @@ $('open-video-capture').addEventListener('click', async () => {
     await videoPanel.open();
   } catch (error) { notice(error.message, true); }
 });
+let freeMocapPanel;
+$('open-freemocap').addEventListener('click', async () => {
+  try {
+    freeMocapPanel ??= new (await import('./freemocap-panel.js')).FreeMocapPanel();
+    await freeMocapPanel.open();
+  } catch (error) { notice(error.message, true); }
+});
 
 function viewerMessage(title, detail) {
   $('viewer-message').hidden = false;
@@ -114,7 +121,7 @@ function setRigFocus(enabled) {
 }
 function updateWorkflowHint() {
   $('workflow-hint').textContent = state.workflow === 'create'
-    ? 'Describe an action or a sequence, check its timing, then generate. Your current animation stays available in the viewer.'
+    ? 'Capture a performance with FreeMoCap, fit a single video, or describe a motion. Each route checks its inputs before processing.'
     : state.workflow === 'review'
       ? completed() ? 'Play the selected version, inspect its source rig, and save small corrections. Originals stay saved.' : 'Choose a completed animation from Animations to review its candidates and make corrections.'
       : completed() ? 'Download this version or prepare its matching Blender and Unreal handoffs.' : 'Choose a completed animation from Animations before exporting.';
@@ -379,7 +386,7 @@ $('create-form').addEventListener('submit', event => {
 function enableActions() {
   $('edit-skeleton').disabled = !completed();
   for (const id of ['review', 'compare', 'build-preview', 'send-blender', 'send-unreal', 'export-motion']) $(id).disabled = !completed() || !state.connected || state.busy.has(id);
-  for (const id of ['generate', 'plan']) $(id).disabled = !state.connected || state.busy.has(id);
+  for (const id of ['generate', 'plan', 'open-freemocap', 'open-video-capture']) $(id).disabled = !state.connected || state.busy.has(id);
   const job = current(), preview = selectedPreview(job, state.sample, state.variant);
   const matchingView = state.viewerMode === 'source' ? rigPanel?.loadedKey === currentKey() : state.previewLoaded && safeLocalUrl(preview?.url) === state.previewUrl;
   const unsavedPose = state.viewerMode === 'source' && rigPanel?.hasDraftPreview;

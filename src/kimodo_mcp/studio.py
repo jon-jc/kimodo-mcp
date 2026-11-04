@@ -21,6 +21,7 @@ from starlette.routing import Route
 
 from .capacity import capacity_snapshot, editor_connections
 from .config import Settings
+from .freemocap_api import TOOL_NAMES as FREEMOCAP_TOOL_NAMES
 from .jobs import JobStore, contained_file, redact
 from .server import create_server
 from .video_api import TOOL_NAMES as VIDEO_TOOL_NAMES
@@ -77,6 +78,7 @@ _ACTIONS = {
     "get_motion_variant",
     "inspect_motion_rig",
     *VIDEO_TOOL_NAMES,
+    *FREEMOCAP_TOOL_NAMES,
 }
 
 

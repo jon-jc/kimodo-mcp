@@ -20,15 +20,16 @@
       <button id="workflow-review" type="button" aria-pressed="false"><span aria-hidden="true">2</span> Review &amp; fix</button>
       <button id="workflow-export" type="button" aria-pressed="false"><span aria-hidden="true">3</span> Export</button>
     </div>
-    <p id="workflow-hint" class="workflow-hint">Describe the actions, preview the plan, then save or generate when ready.</p>
+    <p id="workflow-hint" class="workflow-hint">Capture a performance, fit a reference video, or describe the motion you need.</p>
   </nav>
   <div id="notice" class="notice" hidden role="status"><span id="notice-text"></span><button id="dismiss-notice" aria-label="Dismiss notification">×</button></div>
   </div>
   <div class="workspace" data-workflow="create">
     <aside class="create-panel" aria-label="Animation creation">
-      <div class="panel-heading"><span class="eyebrow">CREATE</span><span class="subtle">01 / Describe</span></div>
-      <h1>From words<br>to movement<span class="accent">.</span></h1>
-      <p class="intro">Give your character something to do.</p>
+      <div class="panel-heading"><span class="eyebrow">CREATE</span><span class="subtle">01 / Choose your source</span></div>
+      <h1>Build a<br>performance<span class="accent">.</span></h1>
+      <p class="intro">Capture a performance or describe the motion you need.</p>
+      <section class="reference-entry runtime-card" aria-label="Capture a performance"><span class="tiny-label">CAPTURE WORKFLOW · FREEMOCAP</span><strong>Build from a recorded performance</strong><p>Synchronize camera views, calibrate, track detailed landmarks and prepare Blender exports in one workspace.</p><button id="open-freemocap" type="button" disabled class="button primary full">Open capture workspace <span>↗</span></button><p class="help">One ordinary video? Use body fitting with explicit estimates.</p><button id="open-video-capture" type="button" disabled class="button secondary full">Single-video fitting · EasyMocap <span>↗</span></button></section>
       <form id="create-form">
         <label for="description" class="field-label">Describe the motion</label>
         <textarea id="description" rows="6" maxlength="2000" required placeholder="A person stands in place and slowly waves with their right hand."></textarea>
@@ -47,7 +48,6 @@
         <button type="submit" id="generate" class="button primary full"><span id="generate-label">Generate animation</span><span aria-hidden="true">✦</span></button>
         <p class="privacy-note">Runs on your local Kimodo installation.<br>Model loading can take a few minutes.</p>
       </form>
-      <section class="reference-entry runtime-card" aria-label="Motion from reference"><span class="tiny-label">MOTION FROM REFERENCE</span><strong>Start with a performance</strong><p>Capture a short video, review the estimated body motion and export it for retargeting.</p><button id="open-video-capture" type="button" class="button secondary full">From video · EasyMocap <span>↗</span></button></section>
       <div class="runtime-card"><span class="tiny-label">RUNTIME</span><strong id="runtime-status">Checking worker…</strong><p id="runtime-detail">Connecting to your local workspace.</p></div>
     </aside>
     <main class="studio-main">

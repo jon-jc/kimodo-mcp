@@ -16,6 +16,7 @@ from kimodo_mcp.capabilities import (
     get_workflow_definition,
 )
 from kimodo_mcp.config import Settings
+from kimodo_mcp.freemocap import FreeMocapRequest
 from kimodo_mcp.handoff import UnrealTarget
 from kimodo_mcp.motion_revision import VariantRevision
 from kimodo_mcp.motion_variants import VariantEdit
@@ -66,6 +67,7 @@ def test_manifest_descriptions_and_annotations_are_copied_not_reinterpreted():
     ("variant_edit", VariantEdit, {"start_frame": 2, "end_frame_exclusive": 30}),
     ("variant_revision", VariantRevision, {"yaw_radians": 0.2}),
     ("video_mocap_request", VideoMocapRequest, {"video_path": "local-fixture.mp4"}),
+    ("freemocap_request", FreeMocapRequest, {"operation": "check_sync", "video_files": ["camera.mp4"]}),
     ("unreal_target", UnrealTarget, None),
 ])
 def test_schemas_are_complete_current_models_and_examples_validate(name, model, example, tmp_path):
@@ -75,7 +77,9 @@ def test_schemas_are_complete_current_models_and_examples_validate(name, model, 
     schema = get_schema_definition(name)
     assert schema == model.model_json_schema()
     assert schema["type"] == "object" and schema["additionalProperties"] is False
-    assert model.model_validate_json(value.model_dump_json()) == value
+    # FreeMoCap forbids explicitly supplied fields belonging to another stage.
+    serialized = value.model_dump_json(exclude_unset=model is FreeMocapRequest)
+    assert model.model_validate_json(serialized) == value
     schema["properties"].clear()
     assert get_schema_definition(name)["properties"]
 
@@ -91,6 +95,7 @@ def _example_references(tmp_path):
     return {
         "input": {"job_id": "0" * 32, "other_job_id": "1" * 32, "sample_index": 0,
                   "video_request": {"video_path": str(tmp_path / "fixture.mp4"), "duration_seconds": 1},
+                  "freemocap_request": {"operation": "check_sync", "video_files": ["camera.mp4"]},
                   "title": "Greeting take", "description": "Approach, stop and greet.",
                   "selected_plan_id": "c" * 64,
                   "request": {"segments": [{"text": "A person waves.", "duration": 2.0}]},
@@ -106,6 +111,7 @@ def _example_references(tmp_path):
                   "revision": {"description": "A person makes a slower wave."},
                   "start_from": {"job_id": "0" * 32, "sample_index": 0, "frame": 10}},
         "steps": {"submit": {"id": "2" * 32}, "retry": {"id": "3" * 32}, "build": {"attempt": 0},
+                  "capture": {"job_id": "d" * 32, "recording_id": "kimodo-fixture"},
                   "plan": {"source": {"sha256": "a" * 64}},
                   "save": {"plan_id": "c" * 64},
                   "export": {"export_id": "a" * 64}, "variant": {"variant_id": "b" * 64},

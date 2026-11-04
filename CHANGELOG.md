@@ -2,6 +2,24 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-03 — FreeMoCap as a core Studio and MCP capture workflow
+
+### Added
+
+- FreeMoCap is the primary recorded-performance entry in Create, alongside Kimodo text animation and EasyMocap single-video fitting. The built-in workspace guides video checks, audio/flash synchronization, new recording import, measured camera calibration, detailed landmark tracking/reconstruction and explicit Blender export.
+- Seven default-registered MCP tools expose the same stages to Claude Code, Codex and other clients. The live catalog now has 64 tools, 15 ordered recipes and 11 complete input schemas; agents can discover every supported stage and advanced parameter without a browser.
+- A pinned local HTTP adapter for FreeMoCap v2.0.0-alpha.25 supports MediaPipe and RTMPose detection controls, temporal filtering, triangulation/outlier controls, explicit calibration selection and scoped cancellation. Reference paths and recording roots are operator-registered; fixed upstream operations do not accept arbitrary commands or destinations.
+- Original optional runtime status extension preserves upstream progress delivery while recording terminal events. Completion binds service instance, pipeline, recording, stopped workers and verified outputs. Missing manager entries or merely present files do not establish success. The explicit launcher checks the clean reviewed revision and uses loopback Host/Origin restrictions without terminating another service on the port.
+- Durable receipts preserve source/output fingerprints and uncertain-submission states. Cross-stage writes are blocked while prior work remains unresolved; calibration recording reuse requires a verified calibration receipt, export requires verified processing, and completed exports are rechecked before reuse.
+- Responsive six-stage workspace includes reviewed-plan gating, stage-specific readiness, recording inspection, receipt loading from agents, explicit calibration selection and export settings. Advanced settings cannot replace common controls or registered paths. Missing runtime and missing status extension have separate explanations.
+- Updated README with current Studio screenshots, a three-route comparison, detailed capture instructions, the complete FreeMoCap tool group, an agent example, fidelity/retargeting boundaries and links to source and operator guides. Updated MCP recipe/schema documentation and change log.
+
+### Validation and boundaries
+
+- Full validation passes 885 Python tests and 80 frontend tests, Ruff and the production build. Coverage includes typed contracts, upstream request mappings, fake-service stage execution, terminal observation, liveness/cancellation races, source/output tampering, calibration provenance, cross-stage conflicts, discovery and UI request/plan gating. Desktop and narrow-screen browser checks confirm actual controls and setup gating.
+- FreeMoCap's external environment was not installed or launched, and real footage was not processed. No camera, Kimodo inference worker, Blender export or Unreal import ran during this integration. Runtime prerequisites and source/model licensing remain separate.
+- One-camera FreeMoCap output is explicitly planar pixel space, not inferred metric depth. Detailed landmarks do not establish articulated finger/facial animation. The pinned Blender path supports MediaPipe only, excludes animated glTF and may fall back to addon defaults; requested export settings remain unverified until inspected. Captured landmarks require explicit character retargeting before Unreal use.
+
 ## 2026-11-03 — Video reference capture through EasyMocap
 
 ### Added

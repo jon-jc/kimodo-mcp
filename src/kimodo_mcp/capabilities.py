@@ -11,6 +11,10 @@ from typing import Any, Literal, get_args
 
 from .assessment import QualityPolicy
 from .catalog import UPSTREAM_REVISION, list_models
+from .freemocap import LIMITATIONS as FREEMOCAP_LIMITATIONS
+from .freemocap import UPSTREAM_REVISION as FREEMOCAP_REVISION
+from .freemocap import UPSTREAM_VERSION as FREEMOCAP_VERSION
+from .freemocap import FreeMocapRequest
 from .handoff import UnrealTarget
 from .motion_revision import VariantRevision
 from .motion_variants import VariantEdit
@@ -21,11 +25,11 @@ from .video_mocap import VideoMocapRequest
 
 WorkflowName = Literal[
     "generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans", "video-mocap",
+    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans", "video-mocap", "freemocap",
 ]
 SchemaName = Literal[
     "generate_request", "animation_brief", "animation_revision", "pose_reference",
-    "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision", "video_mocap_request",
+    "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision", "video_mocap_request", "freemocap_request",
 ]
 WORKFLOW_IDS = get_args(WorkflowName)
 SCHEMA_IDS = get_args(SchemaName)
@@ -41,9 +45,15 @@ _SCHEMAS = {
     "variant_revision": VariantRevision,
     "unreal_target": UnrealTarget,
     "video_mocap_request": VideoMocapRequest,
+    "freemocap_request": FreeMocapRequest,
 }
 
 _GROUPS = {
+    "freemocap": (
+        "Plan and submit explicit stages to a separate local FreeMoCap service",
+        ("get_freemocap_capabilities", "list_freemocap_recordings", "inspect_freemocap_recording",
+         "plan_freemocap_capture", "start_freemocap_capture", "get_freemocap_job", "cancel_freemocap_job"),
+    ),
     "video_mocap": (
         "Capture and review single-person local video",
         ("plan_video_mocap", "start_video_mocap", "get_video_mocap_job", "list_video_mocap_jobs",
@@ -115,6 +125,38 @@ def _handoff_args(source_kind: str) -> tuple[dict, dict]:
 
 
 _RECIPES = {
+    "freemocap": {
+        "title": "Review and submit one explicit FreeMoCap post-processing stage",
+        "inputs": {"freemocap_request": "A freemocap_request for check_sync, synchronize, import, calibrate, process or export."},
+        "requirements": ["An operator-configured compatible local service and contained reference/recording roots.",
+                         "Calibration, processing and export require the pinned status extension; no runtime is started by discovery.",
+                         "Multi-camera 3D needs explicit synchronization and matching calibration; one camera requires deliberate planar acceptance."],
+        "steps": [
+            _step("contract", "get_input_schema", "Read stage-specific fields and omit fields that do not apply.",
+                  arguments={"schema_name": "freemocap_request"}),
+            _step("service", "get_freemocap_capabilities", "Check compatible and status_extension.available for the selected stage.",
+                  on_failure="An operator must configure or explicitly start the separate service; never install or launch it implicitly."),
+            _step("plan", "plan_freemocap_capture", "Review fixed payload, source fingerprints, writes and limitations without submission.",
+                  arguments_from={"request": "input.freemocap_request"}),
+            _step("capture", "start_freemocap_capture", "A durable adapter job_id is returned; submission is not successful completion.",
+                  arguments_from={"request": "input.freemocap_request"},
+                  when="The user requested this explicit stage and its plan was reviewed.",
+                  on_failure="Inspect the receipt named by an uncertain-submission error before retrying; do not duplicate work."),
+            _step("receipt", "get_freemocap_job", "Poll until status is completed with pipeline_completion_verified=true; failed is not success.",
+                  arguments_from={"job_id": "steps.capture.job_id"},
+                  on_failure="Inspect diagnostics and retained partial files. Cancellation is scoped to this receipt; import a new take for a retry."),
+            _step("inspect", "inspect_freemocap_recording", "Review actual contained output hashes and upstream readiness independently of visual quality.",
+                  arguments_from={"recording_id": "steps.capture.recording_id"},
+                  when="This stage returned a recording_id; synchronization-only stages do not create a recording."),
+        ],
+        "completion": "One explicit stage has a verified outcome. Processing does not automatically export or retarget a character.",
+        "notes": ["Import assigns a new recording; use its exact recording_id in later stages.",
+                  "Calibrate a separate board take, then reference its verified result when processing the subject take.",
+                  "Explicit export starts background Blender and supports MediaPipe only; requested cleanup settings are not independently verified.",
+                  "Calibrating updates the external global calibration library. Tracker execution may download external model weights.",
+                  "Single-camera output is planar pixel space. FreeMoCap landmarks are not Kimodo SOMA local rotations or an Unreal retarget mapping.",
+                  "Neither this recipe nor capability discovery contacts the external runtime until an explicit tool is called."],
+    },
     "video-mocap": {
         "title": "Fit and review a bounded single-person video capture",
         "inputs": {"video_request": "video_mocap_request naming a local video and selected time interval."},
@@ -577,6 +619,14 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
         "schema_version": 1, "reviewed_revision": UPSTREAM_REVISION,
         "tool_count": len(by_name), "tools": [by_name[name] for name in sorted(by_name)], "tool_groups": groups,
         "models": list_models(),
+        "freemocap": {"request_schema": "freemocap_request", "workflow": "freemocap",
+                      "reviewed_revision": FREEMOCAP_REVISION, "reviewed_version": FREEMOCAP_VERSION,
+                      "license": "AGPL-3.0", "separate_runtime": True, "automatic_runtime_start": False,
+                      "readiness_tool": "get_freemocap_capabilities", "requires_status_extension": ["calibrate", "process", "export"],
+                      "operations": ["check_sync", "synchronize", "import", "calibrate", "process", "export"],
+                      "limits": {"videos": 8, "video_bytes": 4 * 1024**3, "total_bytes": 16 * 1024**3,
+                                 "duration_seconds": 600, "frames": 144000, "fps": 240},
+                      "limitations": list(FREEMOCAP_LIMITATIONS)},
         "video_mocap": {"request_schema": "video_mocap_request", "workflow": "video-mocap",
                         "separate_job_namespace": True, "bvh_units": "meters", "skeleton": "smpl24",
                         "space": "camera-relative", "scale": "estimated", **deepcopy(VIDEO_CAPABILITIES)},
@@ -631,6 +681,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
             "Editor reachability is only a local TCP check; it does not verify scene, project, rig or available memory.",
             "The Blender and Unreal fixed-script execution paths require their configured local editor integrations.",
             "Completed-motion conversion needs the export runtime and skeleton assets, but no inference weights, generation worker or editor; downloads are disabled.",
+            "FreeMoCap uses a separate operator-configured loopback service; runtime readiness is checked only explicitly. Asynchronous stages require its pinned status extension.",
         ],
         "behavior": [
             "A returned job id means submission. Poll get_job until completed before claiming animation exists.",
@@ -644,7 +695,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
             "Facial animation, independent finger animation, cloth/hair physics or collision simulation in the fitted-character workflow.",
             "Automatic cross-rig retargeting, seamless stitching, velocity matching, arbitrary resampling or automatic contact repair.",
             "Initial Unreal skeletal-mesh import through this server; use the editor's import tools first.",
-            "Arbitrary external file import/conversion, training, benchmark execution or general video/audio rendering; managed NPZ export and bounded single-person video capture are explicit exceptions.",
+            "Arbitrary external file import/conversion, training, benchmark execution or general video/audio rendering; managed NPZ export, bounded video capture and contained explicit FreeMoCap stages are exceptions.",
             "Arbitrary code execution or file read/write, dependency installation or worker/editor startup; explicit Unreal target paths are a bounded import exception.",
             "Public remote hosting or multi-user authorization.",
         ],

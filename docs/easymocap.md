@@ -4,7 +4,7 @@ The video workflow fits a single SMPL body to a selected interval of a local vid
 
 The adapter targets EasyMocap revision `e6006fd3814d5f8ad45a7ce965beb9bcc90767f2`. See the [source audit](mocap-source-audit.md) for the implemented entry points and known upstream pitfalls.
 
-In the Studio, open **Create → From video · EasyMocap**. Choose a file or local path, select the trim and detector, check setup, then explicitly start. The review pairs the analyzed video and skeleton, supports shared playback/scrubbing and displays detection confidence and estimated-frame labels. Setup, capture and review use the same tools listed below.
+In the Studio, open **Create → Single-video fitting · EasyMocap**. Choose a file or local path, select the trim and detector, check setup, then explicitly start. The review pairs the analyzed video and skeleton, supports shared playback/scrubbing and displays detection confidence and estimated-frame labels. Setup, capture and review use the same tools listed below.
 
 ![Synchronized capture review using an isolated synthetic video and skeleton fixture](images/studio-video-review-fixture.jpg)
 
