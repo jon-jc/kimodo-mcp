@@ -6,9 +6,9 @@ Kimodo MCP connects [NVIDIA Kimodo](https://github.com/nv-tlabs/kimodo) to MCP-c
 
 The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or Anthropic API key for motion generation. Your assistant client, model downloads, and editor installations are configured separately.
 
-![Kimodo Motion Studio showing a textured animated character, generation controls, motion diagnostics, and export downloads](docs/images/studio-desktop.png)
+![Create screen with a timed sequence composer, validated frame timeline and an existing character preview](docs/images/studio-sequence-composer.jpg)
 
-*An actual local studio session displaying a completed 120-frame waving motion on a separately supplied demonstration character. The screenshot shows real saved jobs and measured diagnostics. Character assets, model weights, credentials, and local project files are not included in this repository.*
+*The studio separates authoring a plan from viewing an existing animation. A validated sequence describes future generation; it does not replace the character's currently selected saved motion. Character assets, model weights, credentials, and local project files are not included in this repository.*
 
 [Getting started](#getting-started-on-windows) · [Studio workflow](#work-in-the-browser-studio) · [MCP tools](#mcp-tools) · [Agent workflows](docs/agent-workflows.md) · [Architecture](#how-it-works) · [Limitations](#scope-and-limitations) · [Troubleshooting](#troubleshooting)
 
@@ -16,6 +16,7 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 
 | Capability | What you can do |
 | --- | --- |
+| Guided studio workflow | Move between Create, Review & fix, and Export while retaining the current draft, selected motion version and playback position. |
 | Natural-language planning | Describe an action, choose duration and generation effort, and inspect an explicit request before submitting it. |
 | Timed sequences | Supply up to eight self-contained action descriptions with explicit durations and exact planned frame counts. |
 | Saved animation plans | Save, load and revise the complete request before any generation; preserve advanced settings, frame anchors and parent-plan lineage. |
@@ -142,21 +143,30 @@ The default data directory is `%LOCALAPPDATA%\kimodo-mcp` on Windows or `~/.loca
 
 ## Work in the browser studio
 
-1. **Describe the performance.** Include pace, direction, and starting context. Choose one action of 0.2–10 seconds, or enable **Sequence of timed actions** for two to eight explicit beats.
-2. **Preview the plan.** Inspect frames, seed, candidates, effort, and notes. A blank studio seed becomes a fresh random seed, shown after planning. MCP briefs default to zero unless explicitly supplied.
-3. **Generate and follow progress.** Submission saves a job immediately. History exposes stages, failures, cancellation, and worker logs.
-4. **Choose a completed candidate.** Inspect its motion and diagnostics. **Build character preview** runs the registered character's checked Blender handoff; it does not substitute a fake preview for an unfinished job.
-5. **Inspect the model.** Use the camera, timeline, speed, wireframe, and skeleton controls. The opening registered preview is a previously saved asset, not a new result.
-6. **Review or compare.** Open the three-view review, or compare compatible clips at an explicit offset. Root-relative mode removes translation only; world mode retains travel and drift.
-7. **Revise or reuse a pose.** Change a saved request deliberately, or pause a SOMA preview and enable **Start from the current pose** for another generation. Pose anchoring does not guarantee matching velocity or a seamless transition.
-8. **Export.** Download available files, run Blender, or configure the exact Unreal project, Skeleton, SkeletalMesh, destination, and new animation name.
+Use the three persistent workflow buttons:
+
+| Screen | Work here |
+| --- | --- |
+| **Create** | Describe one action or compose timed beats, preview the frame plan, save a reusable request, and explicitly generate when ready. The existing 3D preview remains available as a reference. |
+| **Review & fix** | Select a completed candidate/version, inspect its source rig or fitted character, compare motion, review diagnostics, and save bounded corrections. |
+| **Export** | Download the selected version's verified files, convert motion, or explicitly run a matching Blender/Unreal handoff. |
+
+Switching screens preserves the authoring draft, selected candidate/version and current viewing time. It does not generate, save a correction or run an editor. **Animation history** is a collapsible strip available in every screen; selecting a take opens Review & fix, while **Revise** returns its request to Create. Status messages occupy their own layout space instead of covering playback or action controls. Desktop authoring and viewing panels scroll independently; narrow windows stack the content.
+
+In Create, enable **Sequence of timed actions** for two to eight beats. Edit a card's description and 0.2–10-second duration, move it up/down, duplicate it, or add/remove an action. Editable starters provide an approach/greet/settle, crouch/jump/land, or turn/walk/stop outline. Each beat remains a complete model prompt; sequence notes are authoring context. Clicking a timeline segment selects its card.
+
+**Preview the plan** validates the exact frame allocation, seed, candidate count and sampling settings without inference. Estimates become a validated timeline; shaded tails mark earlier frames revisited by the next action's transition history. The 3D viewer still shows the existing selected animation. A blank studio seed becomes a fresh seed during planning; direct MCP briefs default to zero.
+
+Open **Reusable plans**, enter a title and choose **Validate & save version** to retain the complete request. Load a saved version to preserve custom guidance, sampling steps, transition settings, formats and pose/path constraints. Text-only revisions keep constraints when every beat retains its quantized frame count. Changed allocations require deliberate clearing or rebuilt constraints. Save a changed plan before using **Generate saved plan**. Planning, loading and saving are usable while the worker and editors are stopped.
+
+Once a submitted job completes, use Review & fix to inspect its actual motion. **Build character preview** executes the supported character's checked Blender handoff; it is a separate explicit action. Review a source skeleton without that character, compare compatible clips, or pause a SOMA source and return to Create to anchor another generation. Pose anchoring does not guarantee matching velocity or a seamless transition.
 
 Draft, balanced, and detailed select **20**, **50**, and **80** sampling steps. More steps or candidates do not guarantee a better performance. The planner preserves descriptions and supplied beats; it does not contain a hidden language model that invents choreography or interprets vague edit requests.
 
 <details>
 <summary>View the responsive mobile layout</summary>
 
-<img src="docs/images/studio-mobile.png" alt="Real narrow-screen studio with creation controls, animated character, diagnostics, downloads, comparisons, and job history" width="340" />
+<img src="docs/images/studio-sequence-mobile.jpg" alt="Narrow-screen Create workflow with persistent navigation, timed action cards and reusable-plan controls" width="340" />
 
 The interface adapts to narrow browser windows. It remains a local desktop workflow, not a remote phone-hosting service.
 
@@ -375,13 +385,13 @@ Read the [detailed change log](CHANGELOG.md) for numerical assessment and genera
 
 ## Find and fix joints in the studio
 
-![Focused rig editor with an actual saved forearm correction, full skeleton context, original ghost, and frame-window controls](docs/images/studio-rig-inspector.jpg)
+![Review and fix screen showing the selected source rig and motion-correction controls](docs/images/studio-workflow-review.jpg)
 
-Select a completed candidate and choose **Source rig**. Click a joint in the viewer or search by name. Search narrows the joint list while keeping the skeleton visible. Use body-region filters, **Isolate selected chain**, joint labels and front/side/top camera views to inspect specific parts. On desktop, **Focus rig editor** places the viewer beside the controls; **Show full studio** returns to creation and history.
+Choose **Review & fix**, select a completed candidate and choose **Source rig**. Click a joint in the viewer or search by name. Search narrows the joint list while keeping the skeleton visible. Use body-region filters, **Isolate selected chain**, joint labels and front/side/top camera views to inspect specific parts. Labels avoid colliding on screen, with the selected joint taking priority. On desktop, **Focus rig editor** places the viewer beside the controls; **Exit rig focus** returns to the regular Review layout. History remains accessible, and the workflow buttons take you back to Create or Export.
 
 For a small correction, enter local X/Y/Z offsets in degrees, choose the original start/end frames and blend length, then **Stage joint correction**. Undo, redo or reset the draft before **Save & inspect new version**. The viewer shows the selected saved motion until the backend validates and saves the edit. Every version remains selectable. **Original ghost** compares matching original frames, including after trimming; **Fitted character** separately shows the selected version's verified character preview when available.
 
-The screenshot is a real 120-frame source animation with a saved five-degree forearm correction, viewed at original frame 60. It is not a generated mockup. Read the [studio guide](docs/studio.md#inspect-and-correct-the-source-rig) for controls and keyboard shortcuts, and the [MCP correction guide](docs/rig-corrections.md) to perform the same edits through an assistant.
+The review screen uses actual saved motion. A newly authored sequence is not a new animation until its generation completes. Read the [studio guide](docs/studio.md#inspect-and-correct-the-source-rig) for controls and keyboard shortcuts, and the [MCP correction guide](docs/rig-corrections.md) to perform the same edits through an assistant.
 
 ## Correct an existing animation through MCP
 

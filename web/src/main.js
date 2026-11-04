@@ -1,12 +1,17 @@
 import './styles.css';
 import './rig.css';
+import './sequence.css';
 import { action, anchorFrame, buildBrief, description, duration, jobId, request, revisionChanges, safeLocalUrl, sampleCount, sampleName, setToken } from './api.js';
 import { MotionViewer } from './viewer.js';
 import { RigPanel } from './rig-panel.js';
 import { selectedDownloads, selectedPreview as previewFor, sourceKey, variantArgs } from './rig-data.js';
+import { friendlyPlanningError, needsFreshSeed, PlanGate, savedPlanMetadata, savedPlanRoute, savedSequenceNotes, sharedFrameTime, STARTER_SEQUENCES, WORKFLOW_STEPS, workflowKey, workflowState } from './sequence.js';
+import { SequenceComposer } from './sequence-composer.js';
 
 const $ = id => document.getElementById(id);
 const state = { jobs: [], selected: null, sample: 0, variant: null, viewerMode: 'character', characterInfo: null, revision: null, revisionBase: null, connected: false, polling: false, previewUrl: null, previewLoaded: false, loadedInitial: false, jobSignature: '', comparisonSignature: '', selectionSignature: '', previews: new Map(), verifiedOutputs: new Map(), inspecting: 0, busy: new Set() };
+state.planGate = new PlanGate(); state.loadGate = new PlanGate(); state.libraryGate = new PlanGate(); state.savedPlan = null; state.savedBaseline = null; state.libraryOffset = 0; state.workflow = 'create';
+state.selectionEpoch = 0;
 const presets = {
   wave: 'A person stands in place and slowly waves with their right hand.',
   walk: 'A person walks forward at a relaxed, steady pace with natural arm swings.',
@@ -40,6 +45,7 @@ function showTime(kind, time, total, playing) {
   if (kind === 'source') rigPanel?.updatePosition();
   const timing = selectedTiming();
   if ($('start-pose').checked && timing.frames) $('anchor-note').textContent = `Starting from candidate ${state.sample + 1}${state.variant ? ', selected version' : ''}, frame ${anchorFrame(time, timing.frames, timing.fps)}. Seamless blending is not guaranteed.`;
+  if ($('start-pose').checked && state.planGate.result) { try { if (!state.planGate.current(draftInput())) invalidatePlan(); } catch { invalidatePlan(); } }
 }
 try {
   viewer = new MotionViewer($('viewport'), {
@@ -71,31 +77,71 @@ try {
 } catch (error) { $('rig-status').textContent = `Source viewer unavailable: ${error.message}`; }
 
 function setViewerMode(mode) {
-  if (activeViewer()) activeViewer().playing = false;
+  const outgoing = activeViewer(), incoming = mode === 'source' ? rigPanel?.viewer : viewer;
+  const preview = selectedPreview(current(), state.sample, state.variant);
+  const matchingViews = completed() && rigPanel?.loadedKey === currentKey() && state.previewLoaded && safeLocalUrl(preview?.url) === state.previewUrl;
+  const transferredTime = mode !== state.viewerMode && matchingViews ? sharedFrameTime(outgoing?.time, selectedTiming(), incoming?.duration) : null;
+  if (outgoing) outgoing.playing = false;
   state.viewerMode = mode;
-  $('viewport').hidden = mode !== 'character'; $('rig-viewport').hidden = mode !== 'source'; $('rig-workspace').hidden = mode !== 'source';
+  $('viewport').hidden = mode !== 'character'; $('rig-viewport').hidden = mode !== 'source'; $('rig-workspace').hidden = mode !== 'source' || state.workflow !== 'review';
   $('mode-character').setAttribute('aria-pressed', String(mode === 'character')); $('mode-source').setAttribute('aria-pressed', String(mode === 'source'));
-  $('rig-focus').hidden = mode !== 'source';
+  $('rig-focus').hidden = mode !== 'source' || state.workflow !== 'review';
   if (mode !== 'source') setRigFocus(false);
   else $('rig-focus').disabled = window.innerWidth <= 1000;
   $('wireframe').disabled = mode !== 'character'; $('skeleton').disabled = mode !== 'character';
   const active = activeViewer(); active?.resize(); active?.fit();
+  if (transferredTime !== null) active?.seek(transferredTime);
   $('asset-label').textContent = mode === 'source' ? (rigPanel?.data ? `${rigPanel.data.joint_names.length} source joints · exact frames` : 'Source rig') : (state.previewLoaded ? `${state.characterInfo?.bones ?? '—'} fitted bones · GLB` : 'Fitted character');
   showTime(mode, active?.time ?? 0, active?.duration ?? 0, false); enableActions();
 }
 function setRigFocus(enabled) {
-  state.focusRig = Boolean(enabled && state.viewerMode === 'source' && window.innerWidth > 1000);
+  state.focusRig = Boolean(enabled && state.workflow === 'review' && state.viewerMode === 'source' && window.innerWidth > 1000);
   document.querySelector('.workspace').classList.toggle('rig-focus', state.focusRig);
   $('rig-focus').setAttribute('aria-pressed', String(state.focusRig));
-  $('rig-focus').textContent = state.focusRig ? 'Show full studio' : 'Focus rig editor';
+  $('rig-focus').textContent = state.focusRig ? 'Exit rig focus' : 'Focus rig editor';
   $('rig-focus').disabled = window.innerWidth <= 1000;
   requestAnimationFrame(() => { activeViewer()?.resize(); activeViewer()?.fit(); });
 }
-$('rig-focus').addEventListener('click', () => setRigFocus(!state.focusRig));
+function updateWorkflowHint() {
+  $('workflow-hint').textContent = state.workflow === 'create'
+    ? 'Describe an action or a sequence, check its timing, then generate. Your current animation stays available in the viewer.'
+    : state.workflow === 'review'
+      ? completed() ? 'Play the selected version, inspect its source rig, and save small corrections. Originals stay saved.' : 'Choose a completed animation from Animations to review its candidates and make corrections.'
+      : completed() ? 'Download this version or prepare its matching Blender and Unreal handoffs.' : 'Choose a completed animation from Animations before exporting.';
+}
+function setWorkflow(step) {
+  const changed = state.workflow !== step;
+  Object.assign(state, workflowState(state, step));
+  const workspace = document.querySelector('.workspace'); workspace.dataset.workflow = step;
+  workspace.classList.toggle('rig-focus', state.focusRig);
+  for (const name of WORKFLOW_STEPS) {
+    const button = $(`workflow-${name}`), active = name === step;
+    button.setAttribute('aria-pressed', String(active));
+    if (active) button.setAttribute('aria-current', 'step'); else button.removeAttribute('aria-current');
+  }
+  $('rig-workspace').hidden = step !== 'review' || state.viewerMode !== 'source';
+  $('rig-focus').hidden = step !== 'review' || state.viewerMode !== 'source';
+  $('rig-focus').setAttribute('aria-pressed', String(state.focusRig));
+  $('rig-focus').textContent = state.focusRig ? 'Exit rig focus' : 'Focus rig editor';
+  setTab(state.inspectTab); updateWorkflowHint();
+  if (changed) {
+    document.querySelector('.studio-main').scrollTop = 0;
+    if (window.innerWidth <= 760) window.scrollTo(0, 0);
+  }
+  requestAnimationFrame(() => { activeViewer()?.resize(); });
+}
+for (const step of WORKFLOW_STEPS) {
+  $(`workflow-${step}`).addEventListener('click', () => setWorkflow(step));
+  $(`workflow-${step}`).addEventListener('keydown', event => {
+    const next = workflowKey(step, event.key); if (!next) return;
+    event.preventDefault(); setWorkflow(next); $(`workflow-${next}`).focus();
+  });
+}
+$('rig-focus').addEventListener('click', () => { setWorkflow('review'); setRigFocus(!state.focusRig); });
 window.addEventListener('resize', () => { if (state.focusRig && window.innerWidth <= 1000) setRigFocus(false); $('rig-focus').disabled = window.innerWidth <= 1000; });
-$('mode-source').addEventListener('click', () => setViewerMode('source'));
+$('mode-source').addEventListener('click', () => { setWorkflow('review'); setViewerMode('source'); });
 $('mode-character').addEventListener('click', () => setViewerMode('character'));
-$('motion-version').addEventListener('change', () => { state.variant = $('motion-version').value || null; state.selectionSignature = ''; $('start-pose').checked = false; renderSelection(); });
+$('motion-version').addEventListener('change', () => { state.selectionEpoch++; state.variant = $('motion-version').value || null; state.selectionSignature = ''; $('start-pose').checked = false; renderSelection(); });
 $('play').addEventListener('click', () => activeViewer()?.togglePlay());
 $('scrubber').addEventListener('input', event => activeViewer()?.seek(event.target.value));
 $('speed').addEventListener('change', event => { for (const item of [viewer, rigPanel?.viewer]) if (item) item.speed = Number(event.target.value); });
@@ -104,82 +150,211 @@ for (const [id, method] of [['wireframe', 'setWireframe'], ['skeleton', 'setSkel
   $(id).addEventListener('click', () => { const enabled = $(id).getAttribute('aria-pressed') !== 'true'; $(id).setAttribute('aria-pressed', String(enabled)); viewer?.[method](enabled); });
 }
 
-function brief() {
-  const beats = $('sequence-mode').checked ? [...$('beats').children].map(row => ({ text: row.querySelector('textarea').value, duration: row.querySelector('input').value })) : undefined;
-  const value = buildBrief({ description: $('description').value, duration: $('duration').value, quality: $('quality').value, candidates: $('candidates').value, seed: $('seed').value, beats });
-  if (value.seed === undefined) value.seed = crypto.getRandomValues(new Uint32Array(1))[0];
+function brief(resolveSeed = false) {
+  const beats = $('sequence-mode').checked ? composer.getBeats() : undefined;
+  const value = buildBrief({ description: $('description').value, duration: $('duration').value, quality: $('quality').value, candidates: $('candidates').value, seed: $('seed').value, beats, model: state.composerModel });
+  if (resolveSeed && needsFreshSeed(value, state.savedPlan, state.savedBaseline)) { value.seed = crypto.getRandomValues(new Uint32Array(1))[0]; $('seed').value = value.seed; }
   return value;
 }
 function startFrom() {
-  if (!$('start-pose').checked || $('start-pose').disabled || state.revision) return {};
+  if (!$('start-pose').checked || $('start-pose').disabled || state.revision || state.savedPlan) return {};
   const job = current();
   const timing = selectedTiming();
   return { start_from: { job_id: jobId(job), sample_index: state.sample, ...variantArgs(state.variant), frame: anchorFrame(activeViewer().time, timing.frames, timing.fps) } };
 }
-$('start-pose').addEventListener('change', () => { if ($('start-pose').checked) activeViewer()?.seek(activeViewer().time); $('plan-summary').hidden = true; });
-function countCharacters() { $('character-count').textContent = `${$('description').value.length} / 2000`; $('plan-summary').hidden = true; }
+$('start-pose').addEventListener('change', () => { if ($('start-pose').checked) activeViewer()?.seek(activeViewer().time); invalidatePlan(); });
+function invalidatePlan() { state.planGate.invalidate(); composer?.setPlan(null); $('plan-summary').hidden = true; renderSavedState(); }
+function countCharacters() { $('character-count').textContent = `${$('description').value.length} / 2000`; invalidatePlan(); }
 $('description').addEventListener('input', countCharacters);
+const composer = new SequenceComposer({ container: $('beats'), timeline: $('sequence-timeline'), total: $('sequence-total'), onChange: invalidatePlan, onError: error => notice(error.message, true) });
 function updateSequence() {
   const enabled = $('sequence-mode').checked; $('sequence-panel').hidden = !enabled; $('duration').disabled = enabled;
-  document.querySelector('label[for="description"]').textContent = enabled ? 'Overall scene context' : 'Describe the motion';
-  const rows = [...$('beats').children];
-  rows.forEach((row, index) => { row.querySelector('span').textContent = `Action ${index + 1}`; row.querySelector('button').disabled = rows.length <= 2; row.querySelector('textarea').disabled = !enabled; row.querySelector('input').disabled = !enabled; });
-  $('add-beat').disabled = rows.length >= 8;
-  $('sequence-total').textContent = `${rows.length} actions · ${rows.reduce((sum, row) => sum + (Number(row.querySelector('input').value) || 0), 0).toFixed(1)} seconds total`;
-  $('plan-summary').hidden = true;
+  document.querySelector('.workspace').classList.toggle('sequence-authoring', enabled);
+  document.querySelector('label[for="description"]').textContent = enabled ? 'Sequence notes · not a motion prompt' : 'Describe the motion';
+  composer.setEnabled(enabled); invalidatePlan();
 }
-function addBeat(text = '', seconds = 2) {
-  if ($('beats').children.length >= 8) return;
-  const row = el('div', 'beat'), head = el('div', 'beat-head'), remove = el('button', '', 'Remove'); remove.type = 'button';
-  head.append(el('span'), remove); row.append(head);
-  const input = el('textarea'); input.rows = 2; input.maxLength = 2000; input.required = true; input.value = text; input.setAttribute('aria-label', 'Action description'); input.placeholder = 'A person stands and begins to wave.';
-  const timing = el('label', '', 'Duration'), length = el('input'); length.type = 'number'; length.min = '0.2'; length.max = '10'; length.step = '0.1'; length.value = String(seconds); length.required = true;
-  timing.append(length, el('span', '', 'seconds')); row.append(input, timing);
-  input.addEventListener('input', updateSequence); length.addEventListener('input', updateSequence); remove.addEventListener('click', () => { row.remove(); updateSequence(); });
-  $('beats').append(row); updateSequence();
-}
-$('sequence-mode').addEventListener('change', () => { if ($('sequence-mode').checked && !$('beats').children.length) { addBeat(); addBeat(); } updateSequence(); });
-$('add-beat').addEventListener('click', () => addBeat());
-for (const id of ['duration', 'quality', 'candidates', 'seed']) $(id).addEventListener('input', () => { $('plan-summary').hidden = true; });
+$('sequence-mode').addEventListener('change', () => { if ($('sequence-mode').checked && !composer.beats.length) composer.replace([{ text: '', duration: 2 }, { text: '', duration: 2 }]); updateSequence(); });
+$('add-beat').addEventListener('click', () => composer.add());
+for (const id of ['duration', 'quality', 'candidates', 'seed']) $(id).addEventListener('input', invalidatePlan);
+$('apply-starter').addEventListener('click', () => {
+  const starter = STARTER_SEQUENCES[$('sequence-starter').value]; if (!starter) return;
+  $('sequence-mode').checked = true; $('description').value = starter.description;
+  if (!state.savedPlan) $('saved-plan-title').value = starter.title;
+  composer.replace(starter.beats); updateSequence(); countCharacters(); composer.focus(composer.beats[0].id);
+  notice('Starter actions loaded as editable text and timing. Review each action before previewing the plan.');
+});
 document.querySelectorAll('[data-preset]').forEach(button => button.addEventListener('click', () => { $('description').value = presets[button.dataset.preset]; countCharacters(); $('description').focus(); }));
-$('clear-revision').addEventListener('click', () => { state.revision = null; state.revisionBase = null; $('sequence-mode').disabled = false; $('revision-note').hidden = true; $('generate-label').textContent = 'Generate animation'; enableActions(); });
+$('clear-revision').addEventListener('click', () => { state.revision = null; state.revisionBase = null; state.revisionRequest = null; $('sequence-mode').disabled = false; $('revision-note').hidden = true; $('generate-label').textContent = 'Generate animation'; invalidatePlan(); enableActions(); });
 
 async function withBusy(button, task, message) {
   if (state.busy.has(button.id)) return;
-  state.busy.add(button.id); button.disabled = true; button.classList.add('busy');
+  state.busy.add(button.id); button.disabled = true; button.classList.add('busy'); renderSavedState();
   if (message) notice(message);
-  try { return await task(); } catch (error) { notice(error.message, true); }
+  try { return await task(); } catch (error) { notice(friendlyPlanningError(error.message), true); }
   finally { state.busy.delete(button.id); button.classList.remove('busy'); button.disabled = false; enableActions(); }
 }
 
-$('plan').addEventListener('click', () => withBusy($('plan'), async () => {
-  if (!$('create-form').reportValidity()) return;
-  const input = brief(), changes = state.revision ? revisionChanges(input, state.revisionBase) : null;
-  if (state.revision && !Object.keys(changes).length) throw new Error('Change a setting or the description to preview a revision.');
-  const result = state.revision
-    ? await action('revise_animation', { job_id: state.revision, revision: changes, submit: false })
-    : await action('plan_animation', { brief: input, ...startFrom() });
+function draftInput() {
+  return { brief: brief(), start_from: startFrom().start_from ?? null, saved_plan_id: state.savedPlan?.plan_id ?? null,
+    revision_job_id: state.revision ?? null, clear_constraints: $('clear-plan-constraints').checked };
+}
+function planMetadata() {
+  return savedPlanMetadata(state.savedPlan, { title: $('saved-plan-title').value, sequence: $('sequence-mode').checked, notes: $('description').value }, state.savedContext);
+}
+function loadInput() {
+  // This must also work while the visible draft is incomplete and cannot compile.
+  return { revision: state.planGate.revision, title: $('saved-plan-title').value, selected: $('saved-plan-list').value, start_from: startFrom().start_from ?? null };
+}
+function savedDirty() {
+  if (!state.savedPlan) return false;
+  try {
+    return savedPlanRoute(state.savedPlan, brief(), state.savedBaseline, $('clear-plan-constraints').checked).kind !== 'exact'
+      || planMetadata().changed;
+  } catch { return true; }
+}
+function renderSavedState() {
+  const saved = state.savedPlan, dirty = savedDirty();
+  $('loaded-plan-note').hidden = !saved;
+  if (saved) $('loaded-plan-label').textContent = `${saved.title} · ${saved.plan_id.slice(0, 8)} · ${saved.request.model}`;
+  $('saved-advanced-note').textContent = saved ? `Saved request: ${saved.request.steps} sampling steps · ${(saved.request.constraints ?? []).length} constraint set(s) · ${(saved.request.formats ?? []).join(', ')}. The displayed detail preset changes these sampling steps only if you select a different preset.` : '';
+  $('saved-plan-status').textContent = saved ? dirty ? 'Unsaved changes. Preview and save a new version before generating.' : 'Exact saved request ready. Model, constraints and advanced settings are preserved.' : 'Save a validated plan to reuse its exact settings across the studio and connected agents.';
+  const constraints = (saved?.request ?? state.revisionRequest)?.constraints ?? [];
+  $('clear-plan-constraints-label').hidden = !constraints.length;
+  $('clear-plan-constraints').disabled = !constraints.length;
+  $('saved-constraint-note').textContent = constraints.length ? `${constraints.length} saved constraint set(s). Changing frame allocations requires explicitly clearing them; text-only edits at the same frame allocations preserve them.` : '';
+  for (const id of ['save-plan', 'refresh-plans', 'load-plan', 'previous-plans', 'next-plans']) $(id).disabled = !state.connected || state.busy.has(id) || state.busy.has('load-plan') || state.busy.has('generate') || state.busy.has('refresh-plans')
+    || (id === 'load-plan' && !$('saved-plan-list').value) || (id === 'save-plan' && Boolean(saved && !dirty))
+    || (id === 'previous-plans' && state.libraryOffset <= 0) || (id === 'next-plans' && !(state.libraryOffset + 20 < state.libraryTotal));
+  $('generate').disabled = !state.connected || state.busy.has('generate') || state.busy.has('load-plan') || Boolean(saved && dirty);
+  if (saved) $('generate-label').textContent = dirty ? 'Save changes before generating' : 'Generate saved plan';
+}
+function displayPlan(result) {
   const plan = result.plan ?? {}, generated = result.request ?? {};
-  if (generated.seed !== undefined) $('seed').value = generated.seed;
   const box = $('plan-summary'); box.replaceChildren();
-  box.append(el('strong', '', `${plan.duration_seconds ?? brief().duration_seconds}s · ${plan.total_frames ?? Math.floor(brief().duration_seconds * 30)} frames · ${generated.samples ?? brief().candidates} candidate(s)`));
-  box.append(el('p', '', `Seed ${generated.seed ?? 'assigned at submission'} · ${generated.steps ?? 'planned'} generation steps`));
-  for (const note of (result.notes ?? []).slice(0, 4)) box.append(el('p', '', typeof note === 'string' ? note : note.message ?? 'Review the planned request.'));
-  for (const advisory of (plan.advisories ?? [])) { const item = el('p', 'plan-advisory', advisory.message ?? 'Review the planned transition.'); if (advisory.action) item.append(el('span', '', ` ${advisory.action}`)); box.append(item); }
+  box.append(el('strong', '', `${Number(plan.duration_seconds).toFixed(3)} s · ${plan.total_frames} frames · ${generated.samples} candidate(s)`));
+  box.append(el('p', '', 'Timing preview only. The 3D viewer still shows the selected saved animation.'));
+  const details = el('details', 'plan-details'), advisories = plan.advisories ?? [];
+  details.append(el('summary', '', `Request details${advisories.length ? ` · ${advisories.length} transition note(s)` : ' & notes'}`));
+  details.append(el('p', '', `Seed ${generated.seed ?? 'assigned at submission'} · ${generated.steps ?? 'planned'} generation steps`));
+  for (const note of (result.notes ?? []).slice(0, 4)) details.append(el('p', '', typeof note === 'string' ? note : note.message ?? 'Review the planned request.'));
+  for (const advisory of advisories) { const item = el('p', 'plan-advisory', advisory.message ?? 'Review the planned transition.'); if (advisory.action) item.append(el('span', '', ` ${advisory.action}`)); details.append(item); }
+  box.append(details);
+  if ($('sequence-mode').checked) composer.setPlan(plan);
   box.hidden = false;
+}
+async function previewCurrentPlan() {
+  const input = brief(true), snapshot = draftInput(), ticket = state.planGate.begin(snapshot);
+  let result;
+  if (state.savedPlan) {
+    const route = savedPlanRoute(state.savedPlan, input, state.savedBaseline, snapshot.clear_constraints);
+    result = route.kind === 'exact' ? await action('get_animation_plan', { plan_id: route.plan_id })
+      : await action('revise_animation_plan', { plan_id: route.plan_id, revision: route.revision, save: false });
+  } else if (state.revision) {
+    const changes = revisionChanges(input, state.revisionBase);
+    if (snapshot.clear_constraints) changes.clear_constraints = true;
+    if (!Object.keys(changes).length) throw new Error('Change a setting or the description to preview a revision.');
+    result = await action('revise_animation', { job_id: state.revision, revision: changes, submit: false });
+  } else result = await action('plan_animation', { brief: input, ...(snapshot.start_from ? { start_from: snapshot.start_from } : {}) });
+  let currentInput;
+  try { currentInput = draftInput(); } catch { notice('The draft changed while the plan was being checked. Preview the current draft again.'); return null; }
+  if (!state.planGate.accept(ticket, currentInput, result)) { notice('The draft changed while the plan was being checked. Preview the current draft again.'); return null; }
+  if ($('notice').classList.contains('error')) $('notice').hidden = true;
+  displayPlan(result); renderSavedState(); return result;
+}
+$('plan').addEventListener('click', () => withBusy($('plan'), async () => { if ($('create-form').reportValidity()) await previewCurrentPlan(); }));
+
+async function refreshPlanLibrary(preferredId = null, requestedOffset = state.libraryOffset) {
+  const offset = preferredId ? 0 : requestedOffset;
+  const input = { offset, preferredId }, selectedBefore = $('saved-plan-list').value, ticket = state.libraryGate.begin(input);
+  const result = await action('list_animation_plans', { limit: 20, offset });
+  if (!state.libraryGate.accept(ticket, input, result)) return;
+  state.libraryOffset = offset; state.libraryTotal = result.total ?? 0;
+  const previous = selectedBefore === $('saved-plan-list').value ? preferredId ?? selectedBefore : $('saved-plan-list').value;
+  $('saved-plan-list').replaceChildren(el('option', '', 'Choose a saved plan')); $('saved-plan-list').firstChild.value = '';
+  for (const plan of result.plans ?? []) {
+    const option = el('option', '', `${plan.title} · ${Number(plan.duration_seconds).toFixed(2)} s · ${plan.segment_count} action(s) · ${plan.plan_id.slice(0, 6)}`);
+    option.value = plan.plan_id; $('saved-plan-list').append(option);
+  }
+  if ([...$('saved-plan-list').options].some(option => option.value === previous)) $('saved-plan-list').value = previous;
+  $('saved-library-count').textContent = `${result.plans?.length ? `${offset + 1}–${offset + result.plans.length}` : '0'} of ${result.total ?? 0} saved plans${result.invalid_count ? ` · ${result.invalid_count} unreadable record(s) excluded` : ''}`;
+  state.libraryLoaded = true; renderSavedState();
+}
+function loadSavedPlan(record) {
+  if (!record.request || !record.plan || !/^[0-9a-f]{64}$/.test(record.plan_id)) throw new Error('The server did not return a complete saved plan.');
+  const request = record.request, segments = request.segments;
+  state.savedPlan = record; state.revision = null; state.revisionBase = null; state.revisionRequest = null;
+  state.composerModel = request.model; $('revision-note').hidden = true; $('start-pose').checked = false;
+  $('saved-plan-title').value = record.title; $('clear-plan-constraints').checked = false;
+  $('description').value = segments.length > 1 ? savedSequenceNotes(record) : segments[0].text;
+  $('duration').value = segments[0].duration; $('seed').value = request.seed; $('candidates').value = request.samples;
+  $('quality').value = request.steps >= 70 ? 'detailed' : request.steps <= 20 ? 'draft' : 'balanced';
+  $('sequence-mode').checked = segments.length > 1; $('sequence-mode').disabled = segments.length > 1;
+  composer.replace(segments.length > 1 ? segments : [segments[0], { text: '', duration: 2 }]); updateSequence(); countCharacters();
+  state.savedBaseline = brief(); state.savedContext = $('description').value.trim();
+  const snapshot = draftInput(), ticket = state.planGate.begin(snapshot); state.planGate.accept(ticket, snapshot, record);
+  displayPlan(record); enableActions();
+}
+$('saved-library').addEventListener('toggle', () => { if ($('saved-library').open && !state.libraryLoaded && state.connected) withBusy($('refresh-plans'), () => refreshPlanLibrary()); });
+$('refresh-plans').addEventListener('click', () => withBusy($('refresh-plans'), () => refreshPlanLibrary()));
+for (const [id, delta] of [['previous-plans', -20], ['next-plans', 20]]) $(id).addEventListener('click', () => withBusy($('refresh-plans'), () => refreshPlanLibrary(null, Math.max(0, state.libraryOffset + delta))));
+$('saved-plan-list').addEventListener('change', renderSavedState);
+$('saved-plan-title').addEventListener('input', renderSavedState);
+$('clear-plan-constraints').addEventListener('change', invalidatePlan);
+$('load-plan').addEventListener('click', () => withBusy($('load-plan'), async () => {
+  const snapshot = loadInput(), ticket = state.loadGate.begin(snapshot);
+  const record = await action('get_animation_plan', { plan_id: snapshot.selected });
+  if (!state.loadGate.accept(ticket, loadInput(), record)) { notice('The draft or library selection changed while loading. Your newer edits remain in place; load the selected plan again when ready.'); return; }
+  loadSavedPlan(record); notice('Saved plan loaded for editing. Nothing has been generated.');
 }));
+$('save-plan').addEventListener('click', () => withBusy($('save-plan'), async () => {
+  if (state.savedPlan && !savedDirty()) { notice('This exact plan is already saved. Edit it to create a new version.'); return; }
+  const metadata = planMetadata(), { title } = metadata;
+  if (!title.trim() || title.length > 160) { $('saved-plan-title').focus(); throw new Error('Name the saved plan using 1 to 160 characters.'); }
+  if (!$('create-form').reportValidity()) return;
+  const parent = state.savedPlan?.plan_id ?? null;
+  const compiled = state.planGate.current(draftInput()) ?? await previewCurrentPlan(); if (!compiled) return;
+  const snapshot = draftInput();
+  const record = await action('save_animation_plan', { title, request: compiled.request, description: metadata.description, parent_plan_id: parent });
+  let unchanged = false; try { unchanged = JSON.stringify(snapshot) === JSON.stringify(draftInput()) && JSON.stringify(metadata) === JSON.stringify(planMetadata()); } catch { /* Retain incomplete newer edits. */ }
+  if (unchanged) loadSavedPlan(record);
+  await refreshPlanLibrary(record.plan_id);
+  notice(unchanged ? 'Exact plan saved. Generate saved plan will use this version’s complete request.' : 'The earlier draft snapshot was saved. Your newer edits remain unsaved.');
+}));
+$('new-plan').addEventListener('click', () => {
+  state.savedPlan = null; state.savedBaseline = null; state.savedContext = null; state.revision = null; state.revisionBase = null; state.revisionRequest = null;
+  $('sequence-mode').disabled = false; $('clear-plan-constraints').checked = false; $('revision-note').hidden = true; $('generate-label').textContent = 'Generate animation';
+  invalidatePlan(); enableActions(); notice('New brief started with the visible actions. Saved constraints and advanced request settings are no longer attached.');
+});
+
+function submissionSelection() { return { key: currentKey(), epoch: state.selectionEpoch }; }
+function selectSubmittedJob(result, snapshot) {
+  // A late submission must not replace a candidate chosen while it was pending,
+  // including an A→B→A selection that happens to return to the same source key.
+  if (snapshot.epoch !== state.selectionEpoch || snapshot.key !== currentKey()) return;
+  const id = jobId(result.job ?? result);
+  if (!id) return;
+  state.selected = id; state.sample = 0; state.variant = null; state.selectionSignature = ''; state.selectionEpoch++;
+}
 
 $('create-form').addEventListener('submit', event => {
   event.preventDefault();
   withBusy($('generate'), async () => {
-    const input = brief();
+    const selection = submissionSelection();
+    if (state.busy.has('load-plan')) throw new Error('Wait for the selected saved plan to finish loading.');
+    if (state.savedPlan) {
+      if (savedDirty()) throw new Error('Save the changed plan as a new version before generating.');
+      const result = await action('generate_animation_plan', { plan_id: state.savedPlan.plan_id });
+      selectSubmittedJob(result, selection);
+      notice('The exact saved plan was queued. Its progress will appear in your animation history.'); await refresh(); return;
+    }
+    const input = brief(true);
     const changes = state.revision ? revisionChanges(input, state.revisionBase) : null;
+    if (changes && $('clear-plan-constraints').checked) changes.clear_constraints = true;
     if (state.revision && !Object.keys(changes).length) throw new Error('Change the description or a setting to create a revision. The original request stays saved.');
     const result = state.revision
       ? await action('revise_animation', { job_id: state.revision, revision: changes, submit: true })
       : await action('generate_animation', { brief: input, ...startFrom() });
-    const submitted = result.job ?? result;
-    state.selected = jobId(submitted) ?? state.selected; state.sample = 0; state.variant = null; state.selectionSignature = '';
+    selectSubmittedJob(result, selection);
     notice('Animation queued. Its progress will appear in your animation history.');
     await refresh();
   });
@@ -190,9 +365,12 @@ function enableActions() {
   for (const id of ['generate', 'plan']) $(id).disabled = !state.connected || state.busy.has(id);
   const job = current(), preview = selectedPreview(job, state.sample, state.variant);
   const matchingView = state.viewerMode === 'source' ? rigPanel?.loadedKey === currentKey() : state.previewLoaded && safeLocalUrl(preview?.url) === state.previewUrl;
-  const canAnchor = completed() && !state.revision && matchingView && ['somaskel30', 'somaskel77'].includes(job?.manifest?.skeleton);
+  const canAnchor = completed() && !state.revision && !state.savedPlan && matchingView && ['somaskel30', 'somaskel77'].includes(job?.manifest?.skeleton);
   $('start-pose').disabled = !canAnchor;
   if (!canAnchor) $('start-pose').checked = false;
+  if (state.planGate.result) { try { if (!state.planGate.current(draftInput())) invalidatePlan(); } catch { invalidatePlan(); } }
+  renderSavedState();
+  updateWorkflowHint();
 }
 
 function timeAgo(job) {
@@ -203,16 +381,18 @@ function timeAgo(job) {
 }
 
 function revise(job) {
+  setWorkflow('create');
+  state.savedPlan = null; state.savedBaseline = null; state.composerModel = job.request?.model; state.revisionRequest = job.request;
+  $('clear-plan-constraints').checked = false;
   state.revision = jobId(job);
   $('description').value = description(job);
   $('duration').value = Math.min(duration(job), 10);
   $('seed').value = job.request?.seed ?? '';
   $('candidates').value = job.request?.samples ?? 1;
   $('quality').value = job.request?.steps >= 70 ? 'detailed' : job.request?.steps <= 20 ? 'draft' : 'balanced';
-  $('beats').replaceChildren();
   $('sequence-mode').checked = job.request?.segments?.length > 1;
   $('sequence-mode').disabled = $('sequence-mode').checked;
-  if ($('sequence-mode').checked) for (const segment of job.request.segments) addBeat(segment.text, segment.duration);
+  composer.replace($('sequence-mode').checked ? job.request.segments : [job.request.segments[0], { text: '', duration: 2 }]);
   updateSequence();
   state.revisionBase = brief();
   $('revision-note').hidden = false; $('generate-label').textContent = 'Generate revision';
@@ -255,7 +435,7 @@ function renderJobs() {
       const edit = el('button', '', 'Revise'); edit.addEventListener('click', () => revise(job)); controls.append(edit);
       if (['failed', 'cancelled'].includes(job.status)) {
         const retry = el('button', '', 'Retry request'); retry.id = `retry-${id}`;
-        retry.addEventListener('click', () => withBusy(retry, async () => { const result = await action('generate_motion', { request: job.request }); state.selected = jobId(result.job ?? result); await refresh(); })); controls.append(retry);
+        retry.addEventListener('click', () => withBusy(retry, async () => { const selection = submissionSelection(); const result = await action('generate_motion', { request: job.request }); selectSubmittedJob(result, selection); await refresh(); })); controls.append(retry);
       }
     }
     card.append(controls); $('job-list').append(card);
@@ -310,9 +490,11 @@ function loadPreview(url) {
   return true;
 }
 
-async function selectJob(id, sample = 0) {
+async function selectJob(id, sample = 0, openReview = true) {
+  state.selectionEpoch++;
+  if (id === state.selected && sample === state.sample) { if (openReview) setWorkflow('review'); return; }
   if (id !== state.selected || sample !== state.sample) $('start-pose').checked = false;
-  state.selected = id; state.sample = sample; state.variant = null; state.selectionSignature = ''; setViewerMode('source'); renderJobs(); renderSelection();
+  state.selected = id; state.sample = sample; state.variant = null; state.selectionSignature = ''; if (openReview) setWorkflow('review'); setViewerMode('source'); renderJobs(); renderSelection();
 }
 
 function renderVersions(job) {
@@ -368,7 +550,7 @@ async function renderSelection() {
     const clip = version ? job.variants?.find(item => item.variant_id === version && item.sample_index === index) : job.manifest;
     button.append(el('strong', '', `Candidate ${index + 1}`), el('small', '', `${clip?.frames ?? '—'} frames · ${clip?.fps ?? 30} fps`), el('small', '', available ? `${version ? 'Edited' : 'Original'} preview ready` : `${version ? 'Edited motion' : 'Original motion'} ready · build preview`));
     if (index === state.sample) button.append(el('span', 'candidate-mark', '✓'));
-    button.addEventListener('click', () => selectJob(jobId(job), index)); $('candidates-list').append(button);
+    button.addEventListener('click', () => selectJob(jobId(job), index, false)); $('candidates-list').append(button);
   }
   const preview = selectedPreview(job, state.sample, state.variant);
   if (!preview || !loadPreview(preview.url)) {
@@ -433,7 +615,7 @@ async function buildPreview(button) {
     state.previews.set(key, preview);
     $('export-status').textContent = 'Blender finished. The character and animation have been saved.';
     notice('Character preview ready. You can inspect it or import it into Unreal.');
-    if (currentKey() === key) { state.selectionSignature = ''; setViewerMode('character'); renderSelection(); }
+    if (currentKey() === key) { state.selectionSignature = ''; setWorkflow('review'); setViewerMode('character'); renderSelection(); }
     await refresh();
   }, 'Building the character preview in Blender. This can take a few minutes.');
 }
@@ -504,12 +686,12 @@ $('export-motion').addEventListener('click', () => withBusy($('export-motion'), 
 function setTab(name) {
   for (const item of ['details', 'export']) { $(`tab-${item}`).setAttribute('aria-selected', String(item === name)); $(`${item}-panel`).hidden = item !== name; }
 }
-$('tab-details').addEventListener('click', () => setTab('details'));
-$('tab-export').addEventListener('click', () => setTab('export'));
+$('tab-details').addEventListener('click', () => setWorkflow('review'));
+$('tab-export').addEventListener('click', () => setWorkflow('export'));
 document.querySelector('.inspect-tabs').addEventListener('keydown', event => {
-  if (['ArrowLeft', 'ArrowRight'].includes(event.key)) { event.preventDefault(); const target = $('tab-details').getAttribute('aria-selected') === 'true' ? 'export' : 'details'; setTab(target); $(`tab-${target}`).focus(); }
+  if (['ArrowLeft', 'ArrowRight'].includes(event.key)) { event.preventDefault(); const target = $('tab-details').getAttribute('aria-selected') === 'true' ? 'export' : 'details'; setWorkflow(target === 'details' ? 'review' : 'export'); $(`tab-${target}`).focus(); }
 });
 
-enableActions(); refresh();
+setWorkflow('create'); enableActions(); refresh();
 setInterval(() => { if (!document.hidden) refresh(); }, 3500);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });

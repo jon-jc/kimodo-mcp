@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { MotionViewer } from './viewer.js';
-import { beforeFrame, bodyGroup, jointChain, sourceBounds, visibleJoints } from './rig-data.js';
+import { beforeFrame, bodyGroup, jointChain, layoutJointLabels, sourceBounds, visibleJoints } from './rig-data.js';
 
 const COLORS = { torso: 0xd9d2f0, head: 0xf0d8aa, 'left-arm': 0x71c7d9, 'right-arm': 0xe4a6bd, 'left-hand': 0x80e3bf, 'right-hand': 0xf1c58a, 'left-leg': 0x87aee5, 'right-leg': 0xc7a7ed };
 
@@ -110,12 +110,32 @@ export class RigViewer extends MotionViewer {
 
   updateLabels() {
     if (!this.data) return;
+    const width = this.container.clientWidth, height = this.container.clientHeight, candidates = [];
     this.joints.forEach((joint, index) => {
       const label = this.labelNodes[index], point = joint.position.clone().project(this.camera);
-      label.hidden = !joint.visible || (!this.showLabels && index !== this.selected) || point.z < -1 || point.z > 1 || Math.abs(point.x) > 1 || Math.abs(point.y) > 1;
-      if (!label.hidden) { label.style.left = `${(point.x + 1) / 2 * this.container.clientWidth}px`; label.style.top = `${(1 - point.y) / 2 * this.container.clientHeight}px`; label.classList.toggle('selected', index === this.selected); }
+      label.hidden = width <= 8 || height <= 8 || !joint.visible || (!this.showLabels && index !== this.selected)
+        || ![point.x, point.y, point.z].every(Number.isFinite) || point.z < -1 || point.z > 1 || Math.abs(point.x) > 1 || Math.abs(point.y) > 1;
+      if (label.hidden) return;
+      label.style.transform = 'none'; label.style.boxSizing = 'border-box';
+      label.style.maxWidth = `${width - 8}px`; label.style.maxHeight = `${height - 8}px`;
+      label.style.overflow = 'hidden'; label.style.textOverflow = 'ellipsis';
+      label.title = this.data.joint_names[index];
+      label.classList.toggle('selected', index === this.selected);
+      candidates.push({ index, x: (point.x + 1) / 2 * width, y: (1 - point.y) / 2 * height });
     });
+    // Apply styles before measuring so each collision box matches rendered text.
+    for (const item of candidates) {
+      const label = this.labelNodes[item.index]; item.width = label.offsetWidth; item.height = label.offsetHeight;
+    }
+    const placements = layoutJointLabels(candidates, width, height, this.selected);
+    for (const item of candidates) this.labelNodes[item.index].hidden = true;
+    for (const item of placements) {
+      const label = this.labelNodes[item.index]; label.hidden = false;
+      label.style.left = `${item.left}px`; label.style.top = `${item.top}px`;
+    }
   }
+
+  resize() { super.resize(); if (this.labels) this.updateLabels(); }
 
   select(index) { this.selected = index; this.updatePose(); }
   setFilters(filters) { this.filters = filters; this.updatePose(); }

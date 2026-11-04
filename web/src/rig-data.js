@@ -83,6 +83,29 @@ export function visibleJoints(data, { query = '', group = 'all', isolate = false
 // and chain-isolation controls remove surrounding context from the viewport.
 export function viewerFilters(filters) { return { ...filters, query: '' }; }
 
+// Labels remain inside the actual viewer, not the page viewport. Keep the
+// selected joint first; suppress neighboring text instead of stacking it.
+export function layoutJointLabels(candidates, width, height, selected = null) {
+  const padding = 4, gap = 3;
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= padding * 2 || height <= padding * 2) return [];
+  const ordered = [...candidates].sort((a, b) => Number(b.index === selected) - Number(a.index === selected));
+  const placed = [];
+  for (const item of ordered) {
+    if (![item.x, item.y, item.width, item.height].every(Number.isFinite) || item.width <= 0 || item.height <= 0) continue;
+    const boxWidth = Math.min(item.width, width - padding * 2), boxHeight = Math.min(item.height, height - padding * 2);
+    const top = Math.max(padding, Math.min(item.y - boxHeight / 2, height - padding - boxHeight));
+    // Prefer the usual right-hand label, then try its left-hand counterpart.
+    for (const proposed of [item.x + 9, item.x - 9 - boxWidth]) {
+      const left = Math.max(padding, Math.min(proposed, width - padding - boxWidth));
+      if (placed.some(other => left < other.left + other.width + gap && left + boxWidth + gap > other.left
+        && top < other.top + other.height + gap && top + boxHeight + gap > other.top)) continue;
+      placed.push({ index: item.index, left, top, width: boxWidth, height: boxHeight });
+      break;
+    }
+  }
+  return placed;
+}
+
 export function beforeFrame(data, original, frame) {
   if (!data || !original || (data.original_source_sha256 ?? data.source_sha256) !== original.source_sha256 || JSON.stringify(data.joint_names) !== JSON.stringify(original.joint_names) || JSON.stringify(data.joint_parents) !== JSON.stringify(original.joint_parents) || data.fps !== original.fps) throw new Error('Before/after views require the exact original source and matching hierarchy.');
   if (!Number.isInteger(frame) || frame < 0 || frame >= data.frames) throw new Error('Preview frame is outside this version.');
