@@ -1,6 +1,6 @@
 # Discover and use the complete MCP interface
 
-An assistant can discover the supported animation workflows through MCP itself. It does not need a copy of this repository, a browser session, or an installed model to read the catalog and input schemas. Generating motion still requires the configured runtime and worker; editor operations require their respective local connections.
+An assistant can discover the supported animation workflows through MCP itself. It does not need a copy of this repository, a browser session, or an installed model to read the catalog and input schemas. Kimodo generation, EasyMocap video fitting and FreeMoCap stages are registered by default in the same server for Claude Code, Codex and other MCP clients. Each execution path still needs its separately configured runtime; editor operations require their respective local connections.
 
 Start with these calls:
 
@@ -24,6 +24,8 @@ Call `get_workflow` with one of these identifiers:
 
 | Identifier | Purpose |
 | --- | --- |
+| `freemocap` | Plan and explicitly submit synchronization, import, calibration, processing or Blender export stages to the separate local service. |
+| `video-mocap` | Check and fit a bounded single-person video with EasyMocap, inspect SMPL24 frames and retrieve verified artifacts. |
 | `generate` | Plan a natural brief, submit it, track completion, and review candidates. |
 | `saved-plans` | Save an exact request, preview revisions, retain child plans and submit only when intended. |
 | `revise` | Change selected fields while preserving the original request and outputs. |
@@ -58,6 +60,8 @@ Keep the actual job, sample, `source_kind`, and attempt consistent across prepar
 
 | Schema identifier | Describes |
 | --- | --- |
+| `freemocap_request` | One explicit FreeMoCap stage, contained reference videos, measured calibration and bounded processing/export options. |
+| `video_mocap_request` | A local video, selected interval, frame rate and EasyMocap detector. |
 | `generate_request` | Advanced model, segments, sampling, exports, and kinematic constraints. |
 | `animation_brief` | Natural description, duration or beats, effort, candidates, seed, and model. |
 | `animation_revision` | Explicit changes to an existing request. |
@@ -69,6 +73,16 @@ Keep the actual job, sample, `source_kind`, and attempt consistent across prepar
 | `unreal_target` | Exact project, Skeleton, SkeletalMesh, destination directory, and asset name. |
 
 For a tool's outer argument names, use its `tools/list` input schema. For example, `generate_motion` wraps a `generate_request` object in `request`; `generate_animation` wraps an `animation_brief` in `brief`. Optional `start_from` sits alongside `brief`.
+
+## Capture workflows through the same MCP connection
+
+For FreeMoCap, read `get_workflow("freemocap")` and `get_input_schema("freemocap_request")`, then explicitly call `get_freemocap_capabilities`. This checks the external service only when requested; ordinary Studio refreshes and catalog discovery do not contact it. A typical sequence is synchronization inspection or synchronization, import into a new recording, separate board calibration when needed, subject processing, then explicit export. Each stage uses `plan_freemocap_capture(request)` before `start_freemocap_capture(request)`. Keep the returned adapter `job_id` and `recording_id`; poll `get_freemocap_job`, and require both successful status and verified completion evidence before continuing. Calibration/processing/export require the pinned status extension. One-camera output is planar pixel space, not metric 3D. See [FreeMoCap setup and examples](freemocap.md).
+
+For EasyMocap, use `get_workflow("video-mocap")`, then `plan_video_mocap(request)`. Pass its `source.sha256` as `expected_source_sha256` alongside the unchanged request to explicit `start_video_mocap`; changed footage is rejected before dispatch. Poll `get_video_mocap_job`, review actual frames with `inspect_video_mocap_frames`, and retrieve only verified files with `get_video_mocap_artifact`. This path produces estimated camera-relative SMPL24 motion. See [EasyMocap setup and limits](easymocap.md).
+
+The three workflows have separate job namespaces and skeleton conventions. Do not send video/FreeMoCap IDs to Kimodo correction or registered-character tools, interpret a completed file as physical accuracy, or silently retarget landmarks into another rig. FreeMoCap export is a deliberate background Blender operation; its ordinary processing stage does not open or export Blender automatically.
+
+## MCP resources
 
 Clients that expose MCP resources can read the same information:
 

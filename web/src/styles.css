@@ -79,3 +79,4 @@ button, .button, .small-button { max-width: 100%; overflow-wrap: anywhere; }
 }
 
 .reference-entry { margin-bottom: 16px; }
+.reference-entry .button + .button { margin-top: 8px; }

@@ -31,6 +31,7 @@ from .capabilities import (
 from .capacity import capacity_snapshot, editor_connections
 from .catalog import list_models
 from .config import UPSTREAM_REVISION, Settings
+from .freemocap_api import register_freemocap_tools
 from .handoff import UnrealTarget
 from .handoff import prepare_blender_handoff as prepare_blender_files
 from .handoff import prepare_character_handoff as prepare_character_files
@@ -85,6 +86,9 @@ def create_server(
             "jobs survive client disconnects. Kimodo NPZ coordinates are meters, Y-up, +Z forward, frames zero-based. "
             "For local video use plan_video_mocap before explicit start_video_mocap; these separate capture jobs "
             "produce camera-relative SMPL24 with estimated scale, not SOMA character animation. "
+            "For FreeMoCap use explicit get_freemocap_capabilities and plan_freemocap_capture before each "
+            "start_freemocap_capture stage. Single-camera output is planar, not metric 3D; asynchronous stages "
+            "need the separately launched status extension. Poll the bound receipt and review actual outputs. "
             "This server does not create meshes or automatically fit arbitrary characters."
         ),
         host="127.0.0.1", port=port,
@@ -1019,6 +1023,7 @@ def create_server(
         )
 
     register_video_tools(mcp, settings)
+    register_freemocap_tools(mcp, settings)
     return mcp
 
 

@@ -1,16 +1,16 @@
 # Kimodo MCP & Motion Studio
 
-**Describe a movement, generate skeletal animation locally, inspect the actual result, and bring it into Blender or Unreal Engine.**
+**Capture a performance with FreeMoCap, describe new movement with Kimodo, or fit body motion from video. Review the result and prepare it for your character in Blender or Unreal.**
 
-Kimodo MCP connects [NVIDIA Kimodo](https://github.com/nv-tlabs/kimodo) to MCP-compatible assistants, including Codex and Claude, and provides a browser studio for the same workflow. It combines explicit animation planning, durable background jobs, reproducible candidates, motion diagnostics, interactive character previews, and checked editor handoffs.
+Kimodo MCP connects [NVIDIA Kimodo](https://github.com/nv-tlabs/kimodo) to MCP-compatible assistants, including Codex and Claude, and provides a browser studio for the same workflow. FreeMoCap is a built-in capture workflow alongside text animation and single-video fitting. The studio combines explicit plans, durable job records, reproducible candidates, motion diagnostics, interactive previews, and checked editor handoffs.
 
 The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or Anthropic API key for motion generation. Your assistant client, model downloads, and editor installations are configured separately.
 
-![Create screen with a timed sequence composer, validated frame timeline and an existing character preview](docs/images/studio-sequence-composer.jpg)
+![Create screen with the primary FreeMoCap capture workspace, single-video fitting and text-animation authoring](docs/images/studio-capture-home.jpg)
 
 *The studio separates authoring a plan from viewing an existing animation. A validated sequence describes future generation; it does not replace the character's currently selected saved motion. Character assets, model weights, credentials, and local project files are not included in this repository.*
 
-[Getting started](#getting-started-on-windows) · [Studio workflow](#work-in-the-browser-studio) · [Video references](#capture-a-video-reference) · [MCP tools](#mcp-tools) · [Agent workflows](docs/agent-workflows.md) · [Architecture](#how-it-works) · [Limitations](#scope-and-limitations) · [Troubleshooting](#troubleshooting)
+[Getting started](#getting-started-on-windows) · [Studio workflow](#work-in-the-browser-studio) · [FreeMoCap workflow](#freemocap-reconstruct-a-recorded-performance) · [Video references](#capture-a-video-reference) · [MCP tools](#mcp-tools) · [Agent workflows](docs/agent-workflows.md) · [Architecture](#how-it-works) · [Limitations](#scope-and-limitations) · [Troubleshooting](#troubleshooting)
 
 ## What this project provides
 
@@ -32,9 +32,22 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Precise rig corrections | Inspect all source joints, groups and local axes; save bounded local rotation corrections with smooth frame-window blends, trimming and planar placement. |
 | Numerical assessment | Apply explicit project limits to up to eight takes; inspect problem windows and unavailable evidence without an automatic quality ranking. |
 | Video reference capture | Use a separate EasyMocap runtime for bounded single-video body fitting, explicit short-occlusion estimates, confidence review and verified SMPL24/BVH outputs. |
-| MCP interface | Use 57 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| FreeMoCap capture | Check and synchronize videos, import a take, calibrate cameras, track detailed landmarks, inspect saved results and explicitly export through Blender using shared Studio/MCP controls. |
+| MCP interface | Use 64 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
+
+## Choose how to create the motion
+
+The Studio brings three creation routes into one local project. FreeMoCap is the primary workflow for reconstructing a recorded performance from calibrated camera views. Kimodo creates new motion from an authored description, while EasyMocap provides a separate path for estimating body motion from one ordinary video. All three expose their implemented operations through MCP for Claude Code, Codex and other compatible clients.
+
+| Route | Start with | Result and best use | What must be set up |
+| --- | --- | --- | --- |
+| **FreeMoCap camera workflow** | Synchronized views of the same performance and a measured camera calibration. | Reconstructed landmark trajectories, processing diagnostics and explicit MediaPipe Blender/FBX/BVH export. Use it when the performance and camera geometry are available. | The reviewed separate FreeMoCap runtime, registered reference folders and the status extension. One-camera processing is an explicitly accepted flat result, not depth reconstruction. |
+| **Kimodo text animation** | A description, timed action beats and optional supported pose or path constraints. | New sampled skeletal animation, candidate review, immutable SOMA corrections and compatible export/handoff workflows. | The separate Kimodo worker, supported models, model access and adequate memory. Text and constraints guide a model; they do not guarantee the intended action or production quality. |
+| **EasyMocap video fitting** | One local video of a visible person. | An estimated SMPL body, 24-joint motion, BVH and synchronized video/skeleton review. Use it when calibrated camera views are unavailable. | The pinned EasyMocap environment, FFmpeg and separately licensed body models and weights. Depth, scale and hidden-body motion remain estimates. |
+
+These routes retain their own source data and job records. A FreeMoCap landmark recording or EasyMocap SMPL capture does not automatically become a Kimodo SOMA archive or match an existing game character. Choose and verify a retargeting setup before using captured motion on another rig.
 
 ## Getting started on Windows
 
@@ -148,7 +161,7 @@ Use the three persistent workflow buttons:
 
 | Screen | Work here |
 | --- | --- |
-| **Create** | Describe one action or compose timed beats, preview the frame plan, save a reusable request, and explicitly generate when ready. The existing 3D preview remains available as a reference. |
+| **Create** | Open the primary FreeMoCap capture workspace, fit one video with EasyMocap, or author a single action or timed sequence, preview the frame plan, save a reusable request, and explicitly generate when ready. The existing 3D preview remains available as a reference. |
 | **Review & fix** | Select a completed candidate/version, inspect its source rig or fitted character, compare motion, review diagnostics, and save bounded corrections. |
 | **Export** | Download the selected version's verified files, convert motion, or explicitly run a matching Blender/Unreal handoff. |
 
@@ -181,9 +194,70 @@ The interface adapts to narrow browser windows. It remains a local desktop workf
 
 See [the full studio guide](docs/studio.md), [natural-language workflow](docs/natural-workflow.md), and [structured animation workflows](docs/animation-workflows.md).
 
+## FreeMoCap: reconstruct a recorded performance
+
+Open **Create → Open capture workspace** to work through video checking, synchronization, import, camera calibration, landmark processing and explicit Blender export. Each stage has its own settings, reviewed plan and receipt. The same seven operations are available over MCP, so an agent can inspect and continue a take started in the Studio.
+
+![FreeMoCap workspace with tracking, calibration and stage receipt controls](docs/images/studio-freemocap-workspace.jpg)
+
+*Actual Studio interface with the external runtime not yet configured. The screenshot shows available controls and setup requirements, not a completed capture.*
+
+The interface is part of the project by default. Processing runs in an independently installed local FreeMoCap service, separate from the Kimodo generation worker. Opening this workspace, changing stages or reviewing a plan does not start tracking, recording or Blender. The adapter does not open cameras or record new footage.
+
+### Set up the external runtime once
+
+Follow the [FreeMoCap operator guide](docs/freemocap.md) for the pinned checkout, separate environment, registered folders and status-extension launcher. The reviewed implementation is [FreeMoCap v2.0.0-alpha.25 at revision 700c8614](https://github.com/freemocap/freemocap/tree/700c8614d11d886dacfea8e52333d3c0b942ef52). Other versions can have different routes and processing behavior.
+
+Register its loopback address, recording folder and reference folder in `<KIMODO_DATA_DIR>/freemocap/runtime.json`. Video and calibration names entered through the Studio or MCP are relative to those registered folders, such as `walk/camera-left.mp4`; tools cannot choose arbitrary service URLs or executable paths.
+
+The workspace reports base service compatibility separately from completion-tracking readiness. A compatible base service supports video checking, synchronization and import. Calibration, processing and export require the checked status extension. It preserves upstream progress delivery and records terminal evidence so a submitted task is not mistaken for completed animation. The interface explains a missing extension before enabling those stages. Runtime compatibility does not prove that tracking models are installed or that a calibration is accurate.
+
+### Work through one take
+
+1. **Check videos.** Enter one reference name per line. Use unique filename stems for the camera identities. The adapter reads metadata and validates bounded inputs: up to eight videos, ten minutes each, four GiB per file and sixteen GiB combined, with matching frame rates. Matching frame counts alone do not prove temporal alignment.
+2. **Synchronize.** If needed, align views using shared audio or a visible brightness change. Review the plan, run synchronization and refresh the receipt until its result is verified. Keep that receipt ID for import. The adapter has no scoped synchronization-cancel route and never substitutes a stop-all action.
+3. **Import a take.** Supply the completed synchronization receipt, or explicitly confirm that the input views are already aligned. Import creates a uniquely named recording copy and verifies the copied sources. Original references remain intact. Existing external recordings can be inspected; stages that change data require a recording imported through this adapter.
+4. **Calibrate cameras.** Import the board footage as a separate calibration take. Enter the actual ChArUco board dimensions, measured square size, marker ratio and dictionary. Review the optional board-plane alignment, then run calibration. This operation also updates FreeMoCap's shared calibration library. Wait for verified successful completion before selecting that calibration for the performance take.
+5. **Track and reconstruct.** Select the performance recording and its explicit matching calibration, or a registered calibration TOML. Choose MediaPipe or one of the supported RTMPose configurations. The stage detects landmarks, reconstructs their positions and applies upstream interpolation and filtering. The common controls expose the detector and cutoff; advanced controls cover confidence, model variant, filter order and bounded triangulation settings. Automatic Blender export and editor opening are disabled during processing.
+6. **Export in Blender.** After verified successful MediaPipe processing, review a separate export plan. Choose FBX, BVH, rest pose and optional upstream cleanup. Submission starts background Blender through FreeMoCap and returns a receipt; it does not open an editor window. The inspector lists the contained files, sizes and checksums that actually exist. Inspect the rig, scale, timing and motion before retargeting it into a game project.
+
+Use **Review stage plan** before each explicit stage button. Changing the inputs invalidates the old plan. Use **Refresh status** to inspect progress, or paste a receipt ID created by another MCP client. Calibration and processing can be cancelled only through the exact pipeline recorded in that adapter receipt. Work that remains unverified blocks overlapping changes to the same recording. A `submission_unknown` result needs inspection before retrying because the external service may already have accepted the request.
+
+### Understand the amount of detail
+
+The reviewed MediaPipe tracker has body, left-hand, right-hand and face detection stages; its pose configuration uses the upstream heavy model by default. RTMPose exposes reviewed whole-body model variants. See the pinned [tracker composition](https://github.com/freemocap/freemocap/blob/700c8614d11d886dacfea8e52333d3c0b942ef52/freemocap/core/tracking/tracker_factory.py#L254-L317) and [default tracker configuration](https://github.com/freemocap/freemocap/blob/700c8614d11d886dacfea8e52333d3c0b942ef52/freemocap/core/tasks/mocap/mocap_task_config.py#L44-L50). Those are sources of landmark detail, not proof of accurate articulated finger animation, facial expressions or compatibility with a target character. Hands and faces can occupy very few pixels in a full-body view, and occlusion or tracking errors can leave missing or incorrect observations.
+
+Measured multi-camera calibration supplies the geometry needed for metric reconstruction. A single-camera FreeMoCap request must explicitly set `allow_planar=true`: it places detections on a flat XZ plane with zero Y and pixel-scale magnitudes. It does not infer monocular depth. Its constructed zero reprojection errors do not indicate an accurate 3D capture.
+
+The current FreeMoCap Blender export supports **MediaPipe only**. RTMPose remains available for landmark processing and inspection, but its Blender export is rejected. Animated glTF is excluded. Optional foot locking and hand-range cleanup change marker motion; they do not establish correct contacts or finger articulation. Export receipts report `export_settings_verified=false` because upstream configuration loading can fall back to addon defaults. Nonempty output files alone cannot certify the requested rest pose or cleanup.
+
+Landmark arrays, CSV/Parquet measurements, calibration files and optional `.blend`/FBX/BVH outputs remain distinct from the project's native Kimodo corrections and registered-character handoff. The adapter does not provide automatic SOMA conversion, a facial blendshape solver, general character retargeting or automatic Unreal skeleton compatibility. Better source footage and measured calibration support better reconstruction; the bridge does not promise AAA-quality motion.
+
+### Control the workflow from an agent
+
+Start with `get_capabilities`, then `get_workflow("freemocap")` and `get_input_schema("freemocap_request")`. The schema covers the six explicit stage types. Supply only fields applicable to the selected stage. `plan_freemocap_capture` validates the stage without submitting it; `start_freemocap_capture` is the separate execution step.
+
+| Tool | Agent use |
+| --- | --- |
+| `get_freemocap_capabilities` | Check the configured service, reviewed version, route compatibility, status extension and limits. |
+| `list_freemocap_recordings` | Find recordings inside the registered recording root. |
+| `inspect_freemocap_recording` | Inspect observed readiness and contained output sizes and hashes. |
+| `plan_freemocap_capture` | Review one stage's inputs, effects and source fingerprints without submission. |
+| `start_freemocap_capture` | Explicitly submit the selected stage and retain its receipt. |
+| `get_freemocap_job` | Read that receipt and verify its observed terminal status. |
+| `cancel_freemocap_job` | Request cancellation of the receipt's exact calibration or processing pipeline. |
+
+An example instruction for Claude Code or Codex:
+
+> Use the FreeMoCap workflow to prepare my synchronized performance videos `walk/left.mp4` and `walk/right.mp4`. Read `get_workflow("freemocap")` and the `freemocap_request` schema, then check service and status-extension readiness. Do not submit processing while prerequisites are missing. Check the videos and review the import plan. Use the explicit calibration recording I provide; do not silently choose a previous calibration. For every submitted stage, keep its receipt ID and inspect the result before moving on. Treat `submitted` as pending and `submission_unknown` as unresolved. After verified successful MediaPipe processing, prepare the FBX/BVH export plan and explain its rig and cleanup limitations. Report the actual output files and what still needs visual or retargeting review.
+
+For asynchronous pipelines, check both `status="completed"` and `pipeline_completion_verified=true`. That flag can also accompany a verified failure, so the flag alone is not a success condition. File presence is reported separately from pipeline completion, and neither proves capture quality.
+
+**Validation and licenses:** the adapter and interface are covered by synthetic file, HTTP, pipeline-publication, lifecycle, schema and browser tests. They do not establish real-footage tracking accuracy or a fully installed external runtime on a particular machine. FreeMoCap is separately licensed under [AGPL-3.0](https://github.com/freemocap/freemocap/blob/700c8614d11d886dacfea8e52333d3c0b942ef52/LICENSE); its dependencies, models and Blender components retain their own terms. The bridge does not bundle those sources or assets. See the [full operator and stage guide](docs/freemocap.md) for exact configuration and recovery behavior.
+
 ## Capture a video reference
 
-Open **Create → From video · EasyMocap**. Choose a local file (the browser copies up to 512 MiB into the local reference library), or enter a full path to a video up to 2 GiB. Select a start time, duration, frame rate and body detector, then **Check video & setup**. The checker identifies missing runtime/model files without downloading or processing them. A ready plan enables **Capture this motion**; starting rechecks the source checksum and creates a separate durable video job.
+Open **Create → Single-video fitting · EasyMocap**. Choose a local file (the browser copies up to 512 MiB into the local reference library), or enter a full path to a video up to 2 GiB. Select a start time, duration, frame rate and body detector, then **Check video & setup**. The checker identifies missing runtime/model files without downloading or processing them. A ready plan enables **Capture this motion**; starting rechecks the source checksum and creates a separate durable video job.
 
 The fixed pipeline samples 6–2,400 frames, detects BODY25 landmarks, initializes and fits an SMPL body with temporal regularization, normalizes its actual shaped skeleton, and writes a meter-based BVH with the requested frame rate. Captures do not occupy or start the Kimodo generation worker. Progress, bounded logs, cancellation, detected/problem frames, confidence, reference video, skeleton review and verified downloads are available through both the Studio and MCP.
 
@@ -248,7 +322,7 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **57 tools**, **14 workflow recipes** and **10 input schemas**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, native-job and separate video-capture state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **64 tools**, **15 workflow recipes** and **11 input schemas**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, native-job and separate video-capture state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
@@ -312,8 +386,8 @@ Frame inspection accepts 1–16 increasing source frames. An explicit joint sele
 | `kimodo://workspace` | Current shared workspace state. |
 | `kimodo://models` | Supported model identifiers and export formats. |
 | `kimodo://request-schema` | Advanced generation request schema, retained for compatibility. |
-| `kimodo://schemas/{schema_name}` | One of eight named domain input schemas. |
-| `kimodo://workflows/{workflow}` | One of thirteen ordered workflow recipes. |
+| `kimodo://schemas/{schema_name}` | A named domain input schema from the capability catalog. |
+| `kimodo://workflows/{workflow}` | An ordered workflow recipe from the capability catalog. |
 | `kimodo://jobs/{job_id}` | Durable job status, saved request, and completed manifest. |
 | `kimodo://jobs/{job_id}/outputs` | Verified output metadata for the selected job. |
 
@@ -480,6 +554,8 @@ The external data directory contains `jobs.sqlite3`, `jobs/<job_id>/`, worker st
 
 See [architecture](docs/architecture.md), [studio setup](docs/studio.md), and [motion review](docs/animate-review.md).
 
+FreeMoCap tracking uses a separate local service and recording tree. Its tools are registered by default, while expensive tracking and explicit Blender export run only when submitted. Calibration and processing receipts bind service-instance terminal evidence to verified recording outputs. EasyMocap uses a separately configured fixed-stage process and its own capture jobs. Neither capture path loads the Kimodo text encoder.
+
 ## Safeguards
 
 - **Typed, bounded requests:** model IDs, timing, finite values, samples, and constraint shapes are checked before expensive work.
@@ -515,6 +591,8 @@ Shorter clips and fewer steps do not remove that encoder requirement. The worker
 
 | Area | Evidence and boundary |
 | --- | --- |
+| FreeMoCap integration | Typed stage requests, fake-service lifecycle/output verification, status-publication tests, MCP discovery and real Studio layout/setup checks. No real-footage calibration, tracking or capture export was run for this integration. |
+| Video reference capture | Independent SMPL math/BVH validation and mocked pipeline tests; synchronized video/skeleton UI exercised with an explicitly synthetic fixture. Real fitting remains unverified. |
 | New motion | A completed local Kimodo generation produced the four-second, 120-frame wave used here. It was not substituted with an upstream example. |
 | Blender | Blender 5.2.1 executed the checked character handoff and exported the fitted rig, textured GLB, FBXs, and separate project. Reference roundtrip evidence is in the editor guide. |
 | Completed-motion conversion | Both BVH rest-pose options were exported from a real completed SOMA sample; both AMASS and G1 option variants were exercised with synthetic canonical fixtures. These checks verify conversion without new inference. |
@@ -564,6 +642,9 @@ Build the frontend before building a distributable Python wheel. It writes `web/
 | [Studio](docs/studio.md) | Controls, setup, registration, memory, and recovery. |
 | [Clients](docs/clients.md) | Codex, Claude Code/Desktop, and local HTTP. |
 | [Natural-language workflow](docs/natural-workflow.md) | Briefs, presets, beats, revisions, and pose reuse. |
+| [FreeMoCap workflow](docs/freemocap.md) | Recorded-performance stages, external runtime, calibration, detailed tracking controls, receipts and export limits. |
+| [EasyMocap video capture](docs/easymocap.md) | Single-video setup, estimation, synchronized review and verified SMPL24/BVH output. |
+| [Capture source audit](docs/mocap-source-audit.md) | EasyMocap source mapping, adopted functions and excluded paths. |
 | [Animation workflows](docs/animation-workflows.md) | Coordinates, constraints, reviews, and formats. |
 | [Editor handoffs](docs/editor-handoffs.md) | Blender/Unreal setup, compatibility, conversion evidence. |
 | [Architecture](docs/architecture.md) | Processes, lifecycle, concurrency, storage, transport. |

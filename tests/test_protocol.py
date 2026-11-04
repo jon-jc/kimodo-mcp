@@ -27,6 +27,8 @@ EXPECTED_TOOLS = {
     "generate_animation_plan",
     "plan_video_mocap", "start_video_mocap", "get_video_mocap_job", "list_video_mocap_jobs",
     "get_video_mocap_log", "cancel_video_mocap_job", "inspect_video_mocap_frames", "get_video_mocap_artifact",
+    "get_freemocap_capabilities", "list_freemocap_recordings", "inspect_freemocap_recording",
+    "plan_freemocap_capture", "start_freemocap_capture", "get_freemocap_job", "cancel_freemocap_job",
 }
 
 
@@ -53,7 +55,7 @@ async def assert_agent_discovery(session):
     }
     assert all(template.mimeType == "application/json" and template.description for template in templates)
     for name in ("generate_request", "animation_brief", "animation_revision", "pose_reference",
-                 "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision", "video_mocap_request"):
+                 "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision", "video_mocap_request", "freemocap_request"):
         tool_schema = await session.call_tool("get_input_schema", {"schema_name": name})
         resource_schema = await session.read_resource(f"kimodo://schemas/{name}")
         assert not tool_schema.isError
@@ -61,7 +63,7 @@ async def assert_agent_discovery(session):
         assert tool_schema.structuredContent["type"] == "object"
     for name in ("generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
                  "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion",
-                 "saved-plans", "video-mocap"):
+                 "saved-plans", "video-mocap", "freemocap"):
         recipe = await session.call_tool("get_workflow", {"workflow": name})
         resource_recipe = await session.read_resource(f"kimodo://workflows/{name}")
         assert not recipe.isError
@@ -85,6 +87,9 @@ async def assert_agent_discovery(session):
     assert annotations["plan_video_mocap"].readOnlyHint
     assert annotations["start_video_mocap"].idempotentHint is False
     assert annotations["cancel_video_mocap_job"].destructiveHint
+    assert annotations["get_freemocap_capabilities"].readOnlyHint
+    assert annotations["start_freemocap_capture"].idempotentHint is False
+    assert annotations["cancel_freemocap_job"].destructiveHint
 
 
 async def test_real_stdio_handshake_and_validation(tmp_path):
