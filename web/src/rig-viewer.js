@@ -1,27 +1,52 @@
 import * as THREE from 'three';
+import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { MotionViewer } from './viewer.js';
 import { beforeFrame, bodyGroup, jointChain, layoutJointLabels, sourceBounds, visibleJoints } from './rig-data.js';
+import { pixelJointPick } from './rig-edit.js';
 
 const COLORS = { torso: 0xd9d2f0, head: 0xf0d8aa, 'left-arm': 0x71c7d9, 'right-arm': 0xe4a6bd, 'left-hand': 0x80e3bf, 'right-hand': 0xf1c58a, 'left-leg': 0x87aee5, 'right-leg': 0xc7a7ed };
 
-// Exact source samples only. Draft controls never silently modify this display.
+// Saved clips remain immutable. A separately labelled one-frame draft can be
+// shown while editing; seeking or playback returns to the saved source samples.
 export class RigViewer extends MotionViewer {
   constructor(container, callbacks) {
     super(container, callbacks);
     this.onSelect = callbacks.onSelect;
+    this.editCallbacks = callbacks;
     this.selected = null; this.filters = {}; this.showLabels = false; this.showGhost = true;
     this.labels = document.createElement('div'); this.labels.className = 'rig-label-layer'; container.append(this.labels);
     this.renderer.domElement.setAttribute('aria-label', 'Source skeleton. Click a joint, or use Up and Down to select joints, Left and Right to step frames, Space to play, F to fit.');
-    const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2();
+    this.draftBadge = document.createElement('div'); this.draftBadge.className = 'rig-draft-badge'; this.draftBadge.hidden = true; container.append(this.draftBadge);
+    this.transformTarget = new THREE.Object3D(); this.scene.add(this.transformTarget);
+    this.transform = new TransformControls(this.camera, this.renderer.domElement); this.transform.size = 0.8;
+    this.scene.add(this.transform.getHelper()); this.transform.enabled = false;
+    this.transform.addEventListener('dragging-changed', event => { this.controls.enabled = !event.value; });
+    this.transform.addEventListener('mouseDown', () => {
+      this.ignorePick = true; this.playing = false;
+      if (this.editCallbacks.onDragStart?.() === false) { this.transform.dragging = false; this.controls.enabled = true; }
+    });
+    this.transform.addEventListener('objectChange', () => {
+      if (this.transform.dragging) this.editCallbacks.onDrag?.({ position: this.transformTarget.position.toArray(), quaternion: this.transformTarget.quaternion.toArray() });
+    });
+    this.transform.addEventListener('mouseUp', () => queueMicrotask(() => this.editCallbacks.onDragEnd?.()));
+    const cancelDrag = () => {
+      if (!this.transform.dragging) return;
+      this.cancelManipulation(); this.ignorePick = false; this.editCallbacks.onDragCancel?.();
+    };
+    this.renderer.domElement.addEventListener('pointercancel', cancelDrag);
+    this.renderer.domElement.addEventListener('lostpointercapture', cancelDrag);
     let down = null;
     this.renderer.domElement.addEventListener('pointerdown', event => { down = [event.clientX, event.clientY]; });
     this.renderer.domElement.addEventListener('pointerup', event => {
+      if (this.ignorePick) { this.ignorePick = false; down = null; return; }
       if (!down || Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 5 || !this.data) return;
       const rect = this.renderer.domElement.getBoundingClientRect();
-      pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
-      raycaster.setFromCamera(pointer, this.camera);
-      const hit = raycaster.intersectObjects(this.joints.filter(joint => joint.visible))[0];
-      if (hit) this.onSelect?.(hit.object.userData.jointIndex);
+      const points = this.joints.map((joint, index) => {
+        const point = joint.position.clone().project(this.camera);
+        return { index, visible: joint.visible, x: (point.x + 1) * rect.width / 2, y: (1 - point.y) * rect.height / 2, depth: point.z };
+      });
+      const selected = pixelJointPick(points, event.clientX - rect.left, event.clientY - rect.top);
+      if (selected !== null) this.onSelect?.(selected);
     });
     this.renderer.domElement.addEventListener('keydown', event => {
       if (!this.data || event.altKey || event.ctrlKey || event.metaKey) return;
@@ -83,7 +108,8 @@ export class RigViewer extends MotionViewer {
   updatePose() {
     if (!this.data) return;
     const frame = Math.max(0, Math.min(this.data.frames - 1, Math.round(this.time * this.data.fps)));
-    const poses = this.data.positions[frame], before = this.original ? beforeFrame(this.data, this.original, frame) : poses;
+    const poses = this.draftPose?.positions_m ?? this.data.positions[frame];
+    const before = this.draftPose ? this.draftPose.saved_positions ?? poses : (this.original ? beforeFrame(this.data, this.original, frame) : poses);
     const visible = visibleJoints(this.data, { ...this.filters, selected: this.selected });
     const chain = jointChain(this.data.joint_parents, this.selected);
     let segment = 0;
@@ -104,7 +130,7 @@ export class RigViewer extends MotionViewer {
     this.lines.geometry.attributes.color.needsUpdate = true;
     this.ghost.geometry.attributes.position.needsUpdate = true;
     this.lines.geometry.computeBoundingSphere(); this.ghost.geometry.computeBoundingSphere();
-    this.ghost.visible = this.showGhost && Boolean(this.original && this.data.variant_id);
+    this.ghost.visible = this.showGhost && Boolean(this.draftPose ? this.draftPose.saved_positions : this.original && this.data.variant_id);
     this.updateLabels();
   }
 
@@ -137,12 +163,48 @@ export class RigViewer extends MotionViewer {
 
   resize() { super.resize(); if (this.labels) this.updateLabels(); }
 
+  setManipulator(config) {
+    if (!config) { this.transform.detach(); this.transform.enabled = false; return; }
+    if (this.transform.dragging) return;
+    this.transformTarget.position.fromArray(config.position);
+    const r = config.rotation;
+    this.transformTarget.quaternion.setFromRotationMatrix(new THREE.Matrix4().set(...r[0],0,...r[1],0,...r[2],0,0,0,0,1));
+    this.transform.setMode(config.mode === 'rotate' ? 'rotate' : 'translate');
+    this.transform.setSpace(config.mode === 'rotate' ? 'local' : 'world');
+    this.transform.showX = this.transform.showZ = true; this.transform.showY = !config.root;
+    this.transform.showXY = this.transform.showYZ = !config.root; this.transform.showXZ = true;
+    this.transform.showE = this.transform.showXYZE = false;
+    this.transform.minY = config.root ? config.position[1] : -Infinity;
+    this.transform.maxY = config.root ? config.position[1] : Infinity;
+    this.transform.attach(this.transformTarget); this.transform.enabled = true;
+  }
+
+  showDraftPose(pose, { verified = false, changed = true } = {}) {
+    if (!this.data) return;
+    this.playing = false;
+    const local = pose.original_frame - this.data.source_range.start_frame;
+    const saved = local >= 0 && local < this.data.frames ? this.data.positions[local] : null;
+    this.draftPose = { ...pose, saved_positions: saved };
+    this.draftBadge.hidden = !changed;
+    this.draftBadge.textContent = `${verified ? 'Verified' : 'Interactive'} unsaved draft · original frame ${pose.original_frame}. Playback shows saved motion.`;
+    this.updatePose();
+  }
+
+  clearDraftPose(notify = true) {
+    this.draftPose = null; this.cancelManipulation();
+    if (this.draftBadge) this.draftBadge.hidden = true;
+    this.setManipulator(null); this.updatePose();
+    if (notify) this.editCallbacks.onDraftCleared?.();
+  }
+
+  cancelManipulation() { this.transform.dragging = false; this.transform.axis = null; this.controls.enabled = true; }
+
   select(index) { this.selected = index; this.updatePose(); }
   setFilters(filters) { this.filters = filters; this.updatePose(); }
   setLabels(value) { this.showLabels = value; this.updateLabels(); }
   setGhost(value) { this.showGhost = value; if (this.data) this.bounds = value && this.data.variant_id ? this.comparisonBounds : this.currentBounds; this.updatePose(); this.fit(); }
-  seek(value) { if (!this.data) return; this.time = Math.max(0, Math.min(Number(value), this.duration)); this.playing = false; this.updatePose(); this.callbacks.onTime(this.time, this.duration, false); }
-  togglePlay() { if (!this.data || !this.duration) return; if (this.time >= this.duration) this.seek(0); this.playing = !this.playing; this.callbacks.onTime(this.time, this.duration, this.playing); }
+  seek(value) { if (!this.data) return; this.clearDraftPose(); this.time = Math.max(0, Math.min(Number(value), this.duration)); this.playing = false; this.updatePose(); this.callbacks.onTime(this.time, this.duration, false); this.editCallbacks.onPoseFrame?.(); }
+  togglePlay() { if (!this.data || !this.duration) return; this.clearDraftPose(); if (this.time >= this.duration) this.seek(0); this.playing = !this.playing; this.callbacks.onTime(this.time, this.duration, this.playing); if (!this.playing) this.editCallbacks.onPoseFrame?.(); }
   fit(direction = 'perspective') {
     if (!this.bounds) return;
     const center = this.bounds.getCenter(new THREE.Vector3()), size = this.bounds.getSize(new THREE.Vector3());
@@ -155,6 +217,9 @@ export class RigViewer extends MotionViewer {
     this.grid.position.set(center.x, this.bounds.min.y - span * 0.002, center.z); this.grid.scale.setScalar(span / 2);
   }
   clear() {
+    this.draftPose = null; if (this.draftBadge) this.draftBadge.hidden = true;
+    this.transform?.detach(); if (this.transform) { this.transform.enabled = false; this.cancelManipulation(); }
+    if (this.controls) this.controls.enabled = true;
     this.data = null; this.original = null; this.bounds = null;
     this.labels?.replaceChildren(); this.joints = []; this.labelNodes = [];
     super.clear();

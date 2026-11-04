@@ -161,6 +161,12 @@ Open **Reusable plans**, enter a title and choose **Validate & save version** to
 
 Once a submitted job completes, use Review & fix to inspect its actual motion. **Build character preview** executes the supported character's checked Blender handoff; it is a separate explicit action. Review a source skeleton without that character, compare compatible clips, or pause a SOMA source and return to Create to anchor another generation. Pose anchoring does not guarantee matching velocity or a seamless transition.
 
+**Edit skeleton** opens the source rig and its direct controls. Click a joint, choose **Move joint** to aim its parent bone without stretching, or **Rotate joint** to adjust local orientation. Dragging the root moves the clip across the ground plane. Each completed drag is undoable and previews exact source-skeleton math at the current frame. Choose **Save & inspect new version** for a playable corrected clip; originals remain saved. This is a one-bone adjustment tool, not a full-body IK or automatic contact solver.
+
+![Direct source-rig editing with local rotation rings and independently scrolling controls](docs/images/studio-direct-rig-editing.jpg)
+
+The action composer also supports **Undo actions**, **Redo actions**, and Ctrl/Cmd+Z. Validation opens the first incomplete action and focuses its field. Correction forms retain pending values when another part of the draft is staged; a delayed save cannot replace a newer draft or selection. See the [detailed editing guide](docs/studio.md#direct-viewport-corrections).
+
 Draft, balanced, and detailed select **20**, **50**, and **80** sampling steps. More steps or candidates do not guarantee a better performance. The planner preserves descriptions and supplied beats; it does not contain a hidden language model that invents choreography or interprets vague edit requests.
 
 <details>

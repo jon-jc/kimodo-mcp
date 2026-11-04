@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { duplicateBeat, friendlyPlanningError, makeBeats, moveBeat, needsFreshSeed, PlanGate, removeBeat, requestBeats, savedPlanMetadata, savedPlanRoute, savedSequenceNotes, sequenceTimeline, sharedFrameTime, STARTER_SEQUENCES, WORKFLOW_STEPS, workflowKey, workflowState } from '../src/sequence.js';
+import { duplicateBeat, firstBeatIssue, friendlyPlanningError, makeBeats, moveBeat, needsFreshSeed, PlanGate, removeBeat, requestBeats, savedPlanMetadata, savedPlanRoute, savedSequenceNotes, SequenceHistory, sequenceTimeline, sharedFrameTime, STARTER_SEQUENCES, WORKFLOW_STEPS, workflowKey, workflowState } from '../src/sequence.js';
+import { SequenceComposer } from '../src/sequence-composer.js';
 
 const identities = () => { let id = 0; return () => `beat-${++id}`; };
 const beats = () => makeBeats(STARTER_SEQUENCES.greeting.beats, identities());
@@ -202,4 +203,72 @@ test('representation changes keep the same source frame instead of an independen
   assert.equal(sharedFrameTime(-1, timing, end), 0);
   assert.equal(sharedFrameTime(2, timing, 1.5), 1.5);
   for (const invalid of [{ frames: 0, fps: 30 }, { frames: 120, fps: 0 }, null]) assert.equal(sharedFrameTime(1, invalid, end), null);
+});
+
+test('sequence history groups typing in one field and separates later visits or structural edits', () => {
+  const initial = { beats: beats(), selected: 'beat-1', field: 'text' }, history = new SequenceHistory(initial);
+  const first = structuredClone(initial); first.beats[0].text = 'W'; history.apply(first, 'visit-1');
+  const typed = structuredClone(first); typed.beats[0].text = 'Walk slowly.'; history.apply(typed, 'visit-1');
+  assert.equal(history.past.length, 1);
+  history.commit();
+  const nextVisit = structuredClone(typed); nextVisit.beats[0].text = 'Walk briskly.'; history.apply(nextVisit, 'visit-2');
+  assert.equal(history.past.length, 2);
+  const reordered = { ...nextVisit, beats: moveBeat(nextVisit.beats, 'beat-1', 1) }; history.apply(reordered);
+  assert.deepEqual(history.undo().beats, nextVisit.beats);
+  assert.equal(history.undo().beats[0].text, 'Walk slowly.');
+  assert.deepEqual(history.undo(), initial);
+  assert.equal(history.undo(), null);
+  assert.equal(history.redo().beats[0].text, 'Walk slowly.');
+  assert.equal(history.redo().beats[0].text, 'Walk briskly.');
+  assert.deepEqual(history.redo().beats, reordered.beats);
+  assert.deepEqual(initial.beats, beats());
+});
+
+test('history restores stable identities, active field and deleted actions without sharing snapshots', () => {
+  const original = { beats: beats(), selected: 'beat-2', field: 'duration' }, history = new SequenceHistory(original);
+  const changed = structuredClone(original); changed.beats[1].duration = '4.125'; history.apply(changed, 1); history.commit();
+  history.focus('beat-2', 'duration');
+  const removed = { beats: removeBeat(changed.beats, 'beat-2'), selected: 'beat-3', field: 'text' }; history.apply(removed);
+  const restored = history.undo();
+  assert.equal(restored.selected, 'beat-2'); assert.equal(restored.field, 'duration');
+  assert.deepEqual(restored.beats.map(item => item.id), ['beat-1', 'beat-2', 'beat-3']);
+  assert.equal(restored.beats[1].duration, '4.125');
+  restored.beats[1].text = 'External mutation';
+  assert.notEqual(history.present.beats[1].text, 'External mutation');
+  assert.deepEqual(history.undo(), original);
+});
+
+test('new edits discard only redo and history is bounded; load or starter resets the session', () => {
+  const initial = { beats: beats(), selected: 'beat-1', field: 'duration' }, history = new SequenceHistory(initial, 3);
+  for (let value = 1; value <= 5; value++) { const draft = structuredClone(initial); draft.beats[0].duration = value; history.apply(draft); }
+  assert.equal(history.past.length, 3);
+  history.undo(); assert.equal(history.canRedo, true);
+  const branch = structuredClone(initial); branch.beats[0].duration = 7; history.apply(branch);
+  assert.equal(history.canRedo, false); assert.equal(history.past.length, 3);
+  const starter = { beats: makeBeats(STARTER_SEQUENCES.jump.beats, identities()), selected: 'beat-1', field: 'text' };
+  history.reset(starter);
+  assert.equal(history.canUndo, false); assert.equal(history.canRedo, false); assert.equal(history.undo(), null);
+  assert.deepEqual(history.present, starter);
+});
+
+test('first invalid action identifies the exact collapsed field, including malformed duration and Unicode prompts', () => {
+  const draft = beats(); draft[1].duration = '';
+  assert.deepEqual(firstBeatIssue(draft), { index: 1, id: 'beat-2', field: 'duration', message: 'Action 2 needs a duration from 0.2 to 10 seconds.' });
+  draft[0].text = '   ';
+  assert.equal(firstBeatIssue(draft).field, 'text'); assert.equal(firstBeatIssue(draft).index, 0);
+  draft[0].text = '人が歩く'; draft[1].duration = 1.5;
+  assert.equal(firstBeatIssue(draft), null);
+  draft[2].text = '!!!'; assert.equal(firstBeatIssue(draft).index, 2);
+  assert.throws(() => requestBeats(draft), error => error.beatIndex === 2 && error.field === 'text');
+});
+
+test('composer validation opens and focuses the invalid field before showing its message', () => {
+  const draft = beats(); draft[2].duration = '99';
+  const calls = [], input = { setCustomValidity: value => calls.push(['message', value]), setAttribute: (name, value) => calls.push([name, value]), reportValidity: () => calls.push(['report']) };
+  const fixture = { enabled: true, beats: draft, nodes: new Map([['beat-3', { input }]]), focus: (id, field) => calls.push(['focus', id, field]), onError: error => calls.push(['notice', error.message]) };
+  assert.equal(SequenceComposer.prototype.reportValidity.call(fixture), false);
+  assert.deepEqual(calls[0], ['focus', 'beat-3', 'duration']);
+  assert.ok(calls.some(item => item[0] === 'report'));
+  draft[2].duration = 2; calls.length = 0;
+  assert.equal(SequenceComposer.prototype.reportValidity.call(fixture), true); assert.equal(calls.length, 0);
 });
