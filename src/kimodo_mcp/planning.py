@@ -105,9 +105,6 @@ def plan_animation(brief: AnimationBrief) -> dict:
 def plan_revision(original: dict, revision: AnimationRevision) -> dict:
     before = GenerateRequest.model_validate(original)
     values = before.model_dump(mode="json")
-    timing_edit = revision.beats is not None or revision.duration_seconds is not None
-    if timing_edit and before.constraints and not revision.clear_constraints:
-        raise ValueError("Changing timing with existing constraints requires clear_constraints=true or a new explicit request.")
     if revision.beats is not None:
         values["segments"] = [beat.model_dump() for beat in revision.beats]
     elif revision.description is not None or revision.duration_seconds is not None:
@@ -117,6 +114,12 @@ def plan_revision(original: dict, revision: AnimationRevision) -> dict:
             "text": revision.description if revision.description is not None else before.segments[0].text,
             "duration": revision.duration_seconds if revision.duration_seconds is not None else before.segments[0].duration,
         }]
+    # Frame anchors remain meaningful when every beat retains its quantized allocation.
+    # Comparing total duration alone would miss a shifted boundary between two beats.
+    timing_edit = ([int(segment["duration"] * 30) for segment in values["segments"]]
+                   != before.validated_plan()["segment_frames"])
+    if timing_edit and before.constraints and not revision.clear_constraints:
+        raise ValueError("Changing timing with existing constraints requires clear_constraints=true or a new explicit request.")
     for key, value in {"seed": revision.seed, "samples": revision.candidates,
                        "steps": QUALITY_STEPS.get(revision.quality)}.items():
         if value is not None:
@@ -129,4 +132,5 @@ def plan_revision(original: dict, revision: AnimationRevision) -> dict:
                for key, value in values.items() if original_values[key] != value}
     return {"request": request.model_dump(mode="json"), "plan": request.validated_plan(), "changes": changes,
             "notes": ["Unchanged model, seed, guidance, exports and constraints are preserved.",
+                      "Preserved constraints remain anchored to the same frame indices, even when prompt text changes.",
                       "This generates a new performance; unmodified body parts are not guaranteed identical."]}

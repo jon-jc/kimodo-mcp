@@ -20,7 +20,9 @@ Use separate timed segments rather than packing many actions into one sentence:
 | 2 | 3 seconds | A person carrying a small box slows down and stops. |
 | 3 | 4 seconds | A person bends forward and places a small box on the ground. |
 
-Each prompt must describe its own starting context. Kimodo generates segments in sequence; transitions occupy part of the following segment. Each segment stays within 10 seconds. At 30 FPS, a five-second clip contains 150 frames indexed 0 through 149.
+Each prompt must describe its own starting context. Kimodo generates segments in sequence. Each later segment generates extra transition history and revises or blends the preceding segment's final `transition_frames` samples; its requested action frames remain intact. This does not predict when the action will visually settle. Review `plan.segment_timeline` and the actual boundary movement. Each segment stays within 10 seconds. At 30 FPS, a five-second clip contains 150 frames indexed 0 through 149.
+
+Save the complete request with `save_animation_plan` to keep the sequence, advanced controls and constraints together before generation. See [saved animation plans](saved-animation-plans.md) for frame-window examples and safe text-only revisions.
 
 ## Guide movement with waypoints
 

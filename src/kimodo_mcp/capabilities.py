@@ -18,7 +18,7 @@ from .schemas import GenerateRequest, QualityThresholds
 
 WorkflowName = Literal[
     "generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion",
+    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans",
 ]
 SchemaName = Literal[
     "generate_request", "animation_brief", "animation_revision", "pose_reference",
@@ -47,6 +47,11 @@ _GROUPS = {
     "generation": (
         "Plan, generate and revise motion",
         ("plan_animation", "generate_animation", "revise_animation", "validate_motion", "generate_motion"),
+    ),
+    "saved_plans": (
+        "Save and revise exact animation requests before generation",
+        ("save_animation_plan", "get_animation_plan", "list_animation_plans",
+         "revise_animation_plan", "generate_animation_plan"),
     ),
     "jobs": ("Track and recover jobs", ("get_job", "list_jobs", "cancel_job", "get_job_log")),
     "inspection": (
@@ -99,6 +104,56 @@ def _handoff_args(source_kind: str) -> tuple[dict, dict]:
 
 
 _RECIPES = {
+    "saved-plans": {
+        "title": "Author, save and revise a reproducible animation plan before generating",
+        "inputs": {"title": "A meaningful shot or take label.",
+                   "description": "Optional authoring context; not silently inserted into model prompts.",
+                   "request": "Complete generate_request, including advanced settings and any constraints.",
+                   "revision": "Optional animation_revision for a new child plan.",
+                   "selected_plan_id": "For optional generation, choose the id actually returned by save or revision_save."},
+        "requirements": ["Each segment states its own action and starting context.",
+                         "No worker or editor is required until explicit generation or later handoff."],
+        "steps": [
+            _step("contract", "get_input_schema", "Read all supported settings and constraint shapes.",
+                  arguments={"schema_name": "generate_request"}),
+            _step("validate", "validate_motion", "Review exact frames, transition windows and constraint advisories.",
+                  arguments_from={"request": "input.request"}),
+            _step("save", "save_animation_plan", "Exact validated request is saved under an immutable plan_id; no job starts.",
+                  arguments_from={"title": "input.title", "description": "input.description", "request": "input.request"}),
+            _step("reload", "get_animation_plan", "Verify request_sha256, full request and frame timeline after loading.",
+                  arguments_from={"plan_id": "steps.save.plan_id"}),
+            _step("revision_preview", "revise_animation_plan", "Review changes and preserved settings without saving or generating.",
+                  arguments={"save": False},
+                  arguments_from={"plan_id": "steps.save.plan_id", "revision": "input.revision"},
+                  when="An explicit revision is wanted.",
+                  on_failure="If segment frame counts change, deliberately clear or rebuild constraints; never shift them silently."),
+            _step("revision_save", "revise_animation_plan", "A child plan is saved; the original plan remains unchanged.",
+                  arguments={"save": True},
+                  arguments_from={"plan_id": "steps.save.plan_id", "revision": "input.revision"},
+                  when="The optional revision preview was reviewed and should be retained."),
+            _step("list", "list_animation_plans", "Choose the saved plan_id intended for the next take.",
+                  arguments={"limit": 20, "offset": 0}),
+            _step("workspace", "get_workspace_state", "Check worker readiness and capacity before any submission.",
+                  arguments={"probe_runtime": True, "recent_jobs": 5},
+                  when="Generation has been explicitly requested; otherwise stop with the saved plan."),
+            _step("submit", "generate_animation_plan", "The exact chosen saved request is submitted with plan provenance.",
+                  arguments_from={"plan_id": "input.selected_plan_id"},
+                  when="Generation is intended and the independent worker is available.",
+                  on_failure="Check recent jobs after uncertain submission; generating the same plan again creates another take."),
+            _step("job", "get_job", "Poll the submitted job to completion before reviewing or exporting.",
+                  arguments_from={"job_id": "steps.submit.id"}, when="Submission returned a job id."),
+        ],
+        "completion": "A verified saved request is complete authoring work; animation exists only after a separately submitted job completes.",
+        "notes": [
+            "Choose selected_plan_id from the original save or the optional child revision; never invent an id.",
+            "Plan ids include title, description, request and parent lineage; request_sha256 identifies generation settings alone.",
+            "Loading or revising preserves advanced settings not explicitly changed; a natural brief is not an exact replacement for a saved request.",
+            "Text-only beat revisions retain constraints when every quantized segment frame count is unchanged.",
+            "Later segments generate extra transition history and may reprocess the preceding tail; each requested action keeps its frame count.",
+            "A seed identifies a batch with its settings and sample index; it does not guarantee identical output across runtime changes.",
+            "After completion use inspect, assess-candidates and export workflows; a saved plan cannot be exported as animation.",
+        ],
+    },
     "correct-motion": {
         "title": "Inspect a rig and correct selected joints without new generation",
         "inputs": {"job_id": "Completed original job id.", "sample_index": "Original sample index, default 0.",
@@ -201,7 +256,8 @@ _RECIPES = {
                   arguments={"name": "motion_00.npz"}, arguments_from={"job_id": "steps.submit.id"}),
         ],
         "completion": "Completed revision with its parent id, explicit changes and actual motion review.",
-        "notes": ["Timing edits never silently retime constraints; clear them explicitly or build a new request.",
+        "notes": ["Text-only beat revisions retain constraints when every quantized segment frame count stays unchanged.",
+                  "Changed segment frame counts never silently retime constraints; clear them explicitly or build a new request.",
                   "For an exact retry, use the saved request unchanged with generate_motion."],
     },
     "reuse-pose": {
@@ -478,6 +534,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
                       for name, recipe in _RECIPES.items()],
         "entry_points": {"capabilities": "get_capabilities", "readiness": "get_workspace_state",
                          "natural_brief": "plan_animation", "advanced_request": "validate_motion",
+                         "saved_request": "save_animation_plan",
                          "schema": "get_input_schema", "workflow": "get_workflow"},
         "coordinates": {"native_units": "meters", "up": "+Y", "forward": "+Z", "ground_plane": "XZ",
                         "frame_index_base": 0, "nominal_fps": 30, "bvh_units": "centimeters",
@@ -506,8 +563,17 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
             "reuse": "Source, options, receipt and exported file are verified before reusing the same export_id.",
             "blender": "Pass a returned BVH export_id to prepare_blender_handoff to select that derived source explicitly.",
         },
+        "saved_animation_plans": {
+            "request_schema": "generate_request", "revision_schema": "animation_revision",
+            "workflow": "saved-plans", "immutable": True,
+            "save_load_revision_require_runtime": False,
+            "generation_tool": "generate_animation_plan",
+            "identity": "plan_id hashes version, title, description, exact validated request and parent_plan_id; request_sha256 hashes generation settings alone.",
+            "revision": "Unmentioned settings remain unchanged. With existing constraints, changed per-segment frame counts require explicit clearing or a new request with rebuilt constraints.",
+            "generation": "Explicit submission creates a new job with saved-plan provenance; repeating it creates another take, not an idempotent cache lookup.",
+        },
         "runtime_requirements": [
-            "Discovery, schema access and planning require no model loading or downloads.",
+            "Discovery, schema access, planning and saved-plan authoring require no model loading or downloads.",
             "Generation requires the separately installed runtime, model access and sufficient memory; default service mode needs an independent worker.",
             "Downloads default offline; only operator configuration enables them. MCP does not install dependencies, authenticate or start services.",
             "Editor reachability is only a local TCP check; it does not verify scene, project, rig or available memory.",

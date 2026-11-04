@@ -117,7 +117,7 @@ def test_seed_zero_and_candidate_changes_preserve_constraints_and_guidance():
     "revision",
     [
         {"duration_seconds": 3},
-        {"beats": [{"text": "Wave", "duration": 4}]},
+        {"beats": [{"text": "Wave", "duration": 3}]},
     ],
 )
 def test_timing_edits_never_silently_retime_constraints(revision):
@@ -130,6 +130,25 @@ def test_timing_edits_never_silently_retime_constraints(revision):
 def test_explicit_constraint_clear_is_a_valid_revision():
     result = plan_revision(original(), AnimationRevision(clear_constraints=True))
     assert set(result["changes"]) == {"constraints"}
+
+
+@pytest.mark.parametrize("revision", [
+    {"beats": [{"text": "Wave", "duration": 4}]},
+    {"duration_seconds": 4.01},
+])
+def test_same_quantized_frame_allocations_preserve_constraints(revision):
+    source = original()
+    result = plan_revision(source, AnimationRevision(**revision))
+    assert result["request"]["constraints"] == source["constraints"]
+    assert result["plan"]["segment_frames"] == [120]
+    assert any("same frame indices" in note for note in result["notes"])
+
+
+def test_same_total_with_shifted_beat_boundary_still_requires_clear():
+    source = original(segments=[{"text": "Walk", "duration": 2}, {"text": "Wave", "duration": 2}])
+    with pytest.raises(ValueError, match="clear_constraints"):
+        plan_revision(source, AnimationRevision(beats=[
+            {"text": "Walk", "duration": 1}, {"text": "Wave", "duration": 3}]))
 
 
 def test_multibeat_revision_requires_beats_but_seed_only_is_safe():

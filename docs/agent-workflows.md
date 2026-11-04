@@ -14,7 +14,7 @@ Start with these calls:
 
 These examples show a tool name and its arguments; use the client's normal MCP tool invocation mechanism. They are not shell commands or a separate HTTP request format.
 
-`get_capabilities` derives its tool inventory and count from the running server. Each tool appears in one group with its registered description and annotations. The response includes the model catalog, input-schema identifiers, workflow identifiers, limits, defaults, coordinates, prerequisites, and unsupported operations. `get_workspace_state` adds the worker state, memory advisory, local editor reachability, registered character, saved Unreal target, recent jobs, and any registered opening preview.
+`get_capabilities` derives its tool inventory and count from the running server. Each tool appears in one group with its registered description and annotations. The response includes the model catalog, input-schema identifiers, workflow identifiers, limits, defaults, coordinates, prerequisites, and unsupported operations. `get_workspace_state` adds the worker state, memory advisory, local editor reachability, registered character, saved Unreal target, saved-plan summaries, recent jobs, and any registered opening preview.
 
 Discovery success is not proof that inference can run. A TCP listener does not prove that the intended editor project is open. A registered opening preview is an existing asset and is explicitly identified as such; it is not the result of the current prompt.
 
@@ -25,6 +25,7 @@ Call `get_workflow` with one of these identifiers:
 | Identifier | Purpose |
 | --- | --- |
 | `generate` | Plan a natural brief, submit it, track completion, and review candidates. |
+| `saved-plans` | Save an exact request, preview revisions, retain child plans and submit only when intended. |
 | `revise` | Change selected fields while preserving the original request and outputs. |
 | `reuse-pose` | Inspect a source pose and anchor a new animation to it. |
 | `inspect` | Read timing, selected frames, physical diagnostics, and a visual review. |
@@ -91,7 +92,9 @@ Natural briefs default to four seconds, one candidate, seed zero, the current SO
 
 For more than ten seconds, provide explicit timed beats. Each beat is a separate complete model prompt; the overall description is retained as context and is not silently prepended. The service supports up to eight beats of 0.2–10 seconds, four candidates, 100 sampling steps, 32 constraint objects, and 512 constrained frame entries in a request.
 
-Use `revise_animation` with a rewritten description or explicit replacement beats. Its default `submit=false` only plans the change. With `submit=true`, it creates a new job and records parent lineage. Unmentioned settings remain unchanged. Timing changes never silently shift existing constraints; deliberately clear or rebuild them. An exact retry uses the saved `get_job.request` with `generate_motion`.
+Use `revise_animation` with a rewritten description or explicit replacement beats. Its default `submit=false` only plans the change. With `submit=true`, it creates a new job and records parent lineage. Unmentioned settings remain unchanged. Text-only replacement beats preserve constraints when every quantized segment frame count stays unchanged. Changed segment allocations require deliberate clearing or a new request with rebuilt constraints; anchors are never shifted silently. An exact retry uses the saved `get_job.request` with `generate_motion`.
+
+For authoring before a job exists, save the complete request with `save_animation_plan`, inspect it with `get_animation_plan`, and use `revise_animation_plan(save=false)` to review changes. `save=true` creates an immutable child plan; `generate_animation_plan` separately submits the chosen saved request. `list_animation_plans` returns summaries and an invalid-record count. Do not reconstruct a loaded advanced request from a natural brief or silently replace custom settings with effort presets. See [saved animation plans](saved-animation-plans.md).
 
 Plans expose `segment_timeline`, `constraint_density`, and `advisories`. All planning ranges are zero-based, half-open. Later segments generate extra transition history and may reprocess the preceding segment's tail; this does not remove the requested action frames. The sparse-constraint advisory counts unique frames per effective upstream constraint type and segment, including end-effector expansion; dense root paths are exempt. Warnings are guidance, not hidden request changes or new hard limits.
 
