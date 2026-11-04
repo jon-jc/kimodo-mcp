@@ -2,6 +2,20 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-03 — Exact correction previews and preserved partial revisions
+
+### Added
+
+- `preview_motion_variant` computes exact source-skeleton forward kinematics without writing artifacts or creating jobs. Up to 16 unique original-source frame samples include corrected/original positions and rotations, exact static bone offsets, root placement and per-joint taper weights for interactive controls.
+- `revise_motion_variant` previews partial trim, placement and named-joint changes while preserving all unmentioned settings. Explicit removals and `save=true` produce an immutable original-relative version through the existing pipeline; angles never stack on previous output.
+- Both operations are exposed through MCP and the Studio action API, documented in the correction API guide, and discoverable in the correction workflow. The catalog now has 49 tools and nine domain schemas, including `variant_revision`.
+
+### Validation and boundaries
+
+- Tests compare preview samples exactly with saved SOMA30/SOMA77 outputs, verify source immutability and no-write preview behavior, exercise strict bounds and partial preservation, and check Studio/MCP discovery and protocol exposure.
+- Source checksums are verified before and after preview. Source-frame windows never shift silently; effective joint edits invalidate predicted contacts. Removing all effective joint edits restores original predictions, not a guarantee of physical contact.
+- No inference or editor launch is required or performed by these operations. Direct viewport dragging is separate UI work; previews do not claim anatomical correctness, inverse kinematics or fitted-character deformation quality.
+
 ## 2026-11-03 — Focused studio workflow, sequence composer and layout repairs
 
 ### Added
