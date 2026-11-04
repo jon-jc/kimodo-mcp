@@ -62,7 +62,9 @@ Call `revise_animation` with a job ID and an explicit revision. It returns a pro
 
 Supply a rewritten action, rather than only an instruction such as “make it better.” Model, seed, guidance, exports, and constraints remain unchanged unless an allowed revision explicitly changes them. For multi-beat clips, replace the beats explicitly instead of collapsing them into one description. A changed prompt creates a new performance; unmentioned body parts are not guaranteed to stay identical.
 
-Changing duration or replacing beats when constraints exist requires `clear_constraints=true`, or a new explicit `GenerateRequest` with deliberately chosen constraint timing. Clearing constraints is a visible revision. They are never silently shifted or stretched.
+Existing constraints are preserved when every segment retains its quantized frame count, including text-only replacement beats and duration edits that quantize to the same frames. If any segment's frame count changes, constraints require `clear_constraints=true`, or a new explicit `GenerateRequest` with deliberately rebuilt constraint timing. Keeping only the total duration unchanged is insufficient: moving a boundary between beats can change the action associated with an anchor. Clearing constraints is a visible revision. Constraints are never silently shifted or stretched.
+
+To retain the request before generating, use `save_animation_plan` with the exact `request` returned by planning. `get_animation_plan` loads its complete settings; `revise_animation_plan` previews changes by default and saves a child only with `save=true`. `generate_animation_plan` is the separate submission step. The [saved-plan guide](saved-animation-plans.md) explains immutable identities, advanced-setting preservation and frame timelines.
 
 ## Reuse a selected pose
 

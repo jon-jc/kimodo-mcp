@@ -2,6 +2,28 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-03 — Saved animation plans and constraint-preserving beat revisions
+
+### Added
+
+- Five shared MCP and Studio API operations save, load, list, revise and explicitly generate an animation plan. The running catalog now contains 47 tools, 13 workflow recipes and the existing eight complete domain schemas.
+- Immutable saved plans retain the entire validated generation request, including custom sampling steps, both guidance weights, transition length, initial heading, root margin, postprocessing, export formats and pose convention, and complete constraint arrays. Titles and authoring notes do not silently alter prompts.
+- Content-derived plan identities, separate request hashes, verified receipts, parent-plan lineage and identical-content reuse. Changed content creates a new plan; originals remain available. Missing or invalid receipts are not silently repaired, and listing reports invalid records separately from valid summaries.
+- Revision previews show changed fields without saving or submitting. An explicit `save=true` retains a child plan; the separate `generate_animation_plan` call submits its exact request and records saved-plan provenance on the job.
+- Bounded paginated plan summaries in MCP workspace state, plus all five actions through the existing protected local Studio API. Frequent Studio state polling does not rescan the plan library; clients explicitly refresh it through the list operation.
+- A `saved-plans` discovery recipe and a detailed authoring guide covering practical self-contained beats, exact frame timelines, advanced-setting preservation, deliberate constraint rebuilding, reproducibility limits and later completed-motion review/export.
+
+### Changed
+
+- Text-only replacement beats retain existing constraints when every segment keeps the same quantized frame count. Duration edits that quantize to the same allocation also preserve anchors. A changed segment allocation still requires explicit constraint clearing or a new request with rebuilt constraints; equal total duration alone is insufficient.
+- Corrected transition documentation: each later segment generates extra history and may reprocess the preceding segment's tail. Requested action frames remain present; semantic settling time and seamless continuity are not predicted or guaranteed.
+
+### Validation and scope
+
+- Offline tests cover exact advanced-request round trips, receipt identity and integrity, lineage, duplicate reuse, bounded listing, revision preservation, changed-boundary rejection, explicit submission provenance and shared MCP/Studio access. Route tests retain request-token checks and verify that authoring never submits a generation job; submission is captured by a test stub.
+- A fresh real MCP stdio connection discovered all 47 tools, saved and reloaded a three-beat request with frame allocations `[45, 90, 60]`, and reused its identical saved content. No generation jobs were added or changed during that check.
+- No new inference, worker startup, Blender execution or Unreal import was performed for this delivery. Saved plans establish reproducible instructions, not proof of natural motion, prop interaction, target-engine acceptance or production quality. Repeated explicit generation creates another take; it is not a cached or idempotent generation lookup.
+
 ## 2026-11-03 — Interactive rig inspection and correction studio
 
 ### Added

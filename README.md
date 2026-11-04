@@ -18,6 +18,7 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | --- | --- |
 | Natural-language planning | Describe an action, choose duration and generation effort, and inspect an explicit request before submitting it. |
 | Timed sequences | Supply up to eight self-contained action descriptions with explicit durations and exact planned frame counts. |
+| Saved animation plans | Save, load and revise the complete request before any generation; preserve advanced settings, frame anchors and parent-plan lineage. |
 | Reproducible candidates | Generate one to four samples while preserving model, seed, prompts, constraints, and effective settings. |
 | Saved revisions | Create a new version while retaining every setting you did not explicitly change. |
 | Pose reuse | Select a completed SOMA frame and anchor another generation's initial pose and heading. |
@@ -29,7 +30,7 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Downloads | Retrieve original motion, animated GLB, skeletal mesh/animation FBX, and Blender projects when available. |
 | Precise rig corrections | Inspect all source joints, groups and local axes; save bounded local rotation corrections with smooth frame-window blends, trimming and planar placement. |
 | Numerical assessment | Apply explicit project limits to up to eight takes; inspect problem windows and unavailable evidence without an automatic quality ranking. |
-| MCP interface | Use 42 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| MCP interface | Use 47 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
 
@@ -203,19 +204,24 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **42 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **47 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
 | `get_capabilities` | Discover every registered tool, workflow, schema, model, limit, and implementation boundary. |
 | `get_workflow` | Read an ordered workflow recipe without executing any actions. |
 | `get_input_schema` | Read the complete schema for briefs, revisions, requests, pose references, diagnostics, or Unreal targets. |
-| `get_workspace_state` | Read shared readiness, memory advisory, editor reachability, registered assets, saved target, and recent jobs. |
+| `get_workspace_state` | Read shared readiness, memory advisory, editor reachability, registered assets, saved target, saved plans, and recent jobs. |
 | `list_models` | Exact model IDs, skeletons, formats, and reviewed revision. |
 | `health_check` | Configuration and worker status; optional runtime/GPU probe without weight downloads. |
 | `plan_animation` | Compile a description/timed beats into explicit settings, optionally anchored to a source pose. |
 | `generate_animation` | Submit a brief with transparent effort, seed, and candidate settings. |
 | `revise_animation` | Preview or submit a new version, retaining unchanged settings and parent-job lineage. |
+| `save_animation_plan` | Save an exact validated request under an immutable identifier without starting generation. |
+| `get_animation_plan` | Verify and load a saved request, its hashes, lineage and frame timeline. |
+| `list_animation_plans` | List bounded saved-plan summaries with pagination and an invalid-record count. |
+| `revise_animation_plan` | Preview explicit changes or save a child plan while preserving unmentioned settings. |
+| `generate_animation_plan` | Explicitly submit the exact saved request and attach its plan provenance to a new job. |
 | `extract_pose_constraint` | Extract a validated full-body or limb constraint from a canonical SOMA frame. |
 | `extract_motion_constraints` | Map up to 128 actual SOMA source frames to explicit destination constraint frames. |
 | `validate_motion` | Check a structured request, frame plan, compatibility, and constraint shapes. |
@@ -261,13 +267,23 @@ Frame inspection accepts 1–16 increasing source frames. An explicit joint sele
 | `kimodo://models` | Supported model identifiers and export formats. |
 | `kimodo://request-schema` | Advanced generation request schema, retained for compatibility. |
 | `kimodo://schemas/{schema_name}` | One of eight named domain input schemas. |
-| `kimodo://workflows/{workflow}` | One of twelve ordered workflow recipes. |
+| `kimodo://workflows/{workflow}` | One of thirteen ordered workflow recipes. |
 | `kimodo://jobs/{job_id}` | Durable job status, saved request, and completed manifest. |
 | `kimodo://jobs/{job_id}/outputs` | Verified output metadata for the selected job. |
 
 The `animation_workflow` prompt guides assistants through the lifecycle. The [agent workflow guide](docs/agent-workflows.md) lists every recipe and schema identifier, explains actual frame/constraint access, and distinguishes implemented MCP operations from upstream-only features and operator setup. Discovery tools remain usable when a client does not expose MCP resources. Reconnect a client with a cached tool list after upgrading.
 
 ## Request examples
+
+### Save a sequence before generating
+
+Use `save_animation_plan` with a title and a complete `GenerateRequest`, including the `request` returned by `plan_animation` when starting from a brief. Loading it preserves custom sampling steps, both guidance weights, transition length, heading, root margin, postprocessing, export settings, and exact constraint arrays. The saved plan has its own immutable `plan_id`; `request_sha256` identifies the generation settings independently of the title and parent lineage.
+
+`revise_animation_plan` previews changes by default. Set `save=true` to retain a child plan; neither action starts inference. Text-only beat revisions keep existing constraints when every beat retains the same quantized frame count. A changed segment allocation requires deliberate clearing or a new explicit request with rebuilt constraints. `generate_animation_plan` is the separate submission step and creates a new job with saved-plan provenance.
+
+Read the [saved animation plan guide](docs/saved-animation-plans.md) or call `get_workflow("saved-plans")` for complete examples, transition-window interpretation, reproducibility limits and the later review/export workflow. Saved requests can be authored while the generation worker and editors are stopped.
+
+### Start from a natural brief
 
 Pass this object to `plan_animation`, then `generate_animation` when ready:
 

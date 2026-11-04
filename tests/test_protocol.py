@@ -22,6 +22,8 @@ EXPECTED_TOOLS = {
     "build_character_preview", "list_job_outputs", "inspect_motion_frames", "extract_motion_constraints",
     "export_motion", "assess_motion_quality", "assess_motion_candidates",
     "inspect_motion_rig", "create_motion_variant", "get_motion_variant",
+    "save_animation_plan", "get_animation_plan", "list_animation_plans", "revise_animation_plan",
+    "generate_animation_plan",
 }
 
 
@@ -55,7 +57,8 @@ async def assert_agent_discovery(session):
         assert tool_schema.structuredContent == json.loads(resource_schema.contents[0].text)
         assert tool_schema.structuredContent["type"] == "object"
     for name in ("generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-                 "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion"):
+                 "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion",
+                 "saved-plans"):
         recipe = await session.call_tool("get_workflow", {"workflow": name})
         resource_recipe = await session.read_resource(f"kimodo://workflows/{name}")
         assert not recipe.isError
@@ -72,6 +75,10 @@ async def assert_agent_discovery(session):
     assert annotations["save_unreal_target"].destructiveHint
     assert annotations["generate_animation"].idempotentHint is False
     assert annotations["build_character_preview"].readOnlyHint is False
+    assert annotations["get_animation_plan"].readOnlyHint
+    assert annotations["list_animation_plans"].readOnlyHint
+    assert annotations["save_animation_plan"].idempotentHint
+    assert annotations["generate_animation_plan"].idempotentHint is False
 
 
 async def test_real_stdio_handshake_and_validation(tmp_path):

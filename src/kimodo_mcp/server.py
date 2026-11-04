@@ -17,6 +17,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field, StrictInt
 
+from .animation_plans import AnimationPlanStore, PlanDescription, PlanId, PlanTitle
 from .artifacts import create_preview
 from .artifacts import inspect_motion as inspect_archive
 from .assessment import CandidateReference, QualityPolicy
@@ -58,6 +59,7 @@ def create_server(
     settings = settings or Settings.from_env()
     workspace = workspace or Workspace(settings)
     store = workspace.store
+    saved_plans = AnimationPlanStore(settings.data_dir)
     store.recover_stale()
     mcp = FastMCP(
         "Kimodo Motion Studio",
@@ -67,6 +69,8 @@ def create_server(
             "the complete typed controls. Use plan_animation then generate_animation for natural briefs; "
             "validate_motion then generate_motion for explicit constraints. Use revise_animation for "
             "preserved revisions and inspect_motion_frames/extract_motion_constraints for actual source poses. "
+            "Save complete requests with save_animation_plan for shared studio/agent authoring; "
+            "get and revise saved plans offline, then explicitly generate_animation_plan when ready. "
             "Poll get_job; submission is not completion. Read planning advisories, then use assess_motion_candidates "
             "with an explicit quality_policy and inspect the returned problem frames before selecting. "
             "Use inspect_motion_rig and create_motion_variant for precise local joint corrections without inference; "
@@ -161,6 +165,7 @@ def create_server(
             "health": health_check(probe_runtime), "character": character,
             "unreal_target": workspace.project_target(),
             "jobs": store.list(recent_jobs) if recent_jobs else [],
+            "saved_plans": saved_plans.list(),
             "opening_preview": {"path": str(preview), "uri": preview.as_uri(),
                                 "source": "operator_registered_preview", "generated_for_current_request": False}
             if preview else None,
@@ -258,6 +263,59 @@ def create_server(
                    }}
         job = store.submit(plan["request"], context=context)
         return {**job, "plan": plan["plan"], "changes": plan["changes"], "notes": plan["notes"]}
+
+    @mcp.tool(annotations=DERIVED_EXPORT)
+    def save_animation_plan(
+        title: PlanTitle, request: GenerateRequest, description: PlanDescription = "",
+        parent_plan_id: PlanId | None = None,
+    ) -> dict[str, Any]:
+        """Save the exact validated request as an immutable shared plan; never submit generation.
+
+        Includes every advanced constraint and setting. Identical content and parent reuse the
+        same plan; edits create another plan. Plans are shared with the local studio.
+        """
+        return saved_plans.save(title, request, description, parent_plan_id)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def get_animation_plan(plan_id: PlanId) -> dict[str, Any]:
+        """Load a verified saved plan, its complete executable request and current planning advisories."""
+        return saved_plans.get(plan_id)
+
+    @mcp.tool(annotations=READ_ONLY)
+    def list_animation_plans(
+        limit: Annotated[StrictInt, Field(ge=1, le=100)] = 20,
+        offset: Annotated[StrictInt, Field(ge=0, le=10000)] = 0,
+    ) -> dict[str, Any]:
+        """List bounded shared-plan summaries, newest first; report invalid receipt count separately."""
+        return saved_plans.list(limit, offset)
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    def revise_animation_plan(
+        plan_id: PlanId, revision: AnimationRevision, title: PlanTitle | None = None,
+        save: Annotated[bool, Field(strict=True)] = False,
+    ) -> dict[str, Any]:
+        """Preview an explicit plan revision, or save a new immutable version; never generate.
+
+        Preserve all unedited controls. Timing changes require explicit constraint clearing;
+        text changes with identical quantized beat allocations keep the same frame anchors.
+        """
+        original = saved_plans.get(plan_id)
+        result = plan_revision(original["request"], revision)
+        result.update(title=title if title is not None else original["title"],
+                      description=original["description"], source_plan_id=plan_id,
+                      parent_plan_id=plan_id)
+        if save:
+            result.update(saved_plans.save(result["title"], GenerateRequest.model_validate(result["request"]),
+                                           result["description"], plan_id))
+        return result
+
+    @mcp.tool(annotations=GENERATION)
+    def generate_animation_plan(plan_id: PlanId) -> dict[str, Any]:
+        """Explicitly submit exactly one verified saved request; return a job, not completed animation."""
+        saved = saved_plans.get(plan_id)
+        job = store.submit(saved["request"], context={"saved_plan_id": plan_id,
+                                                      "request_sha256": saved["request_sha256"]})
+        return {**job, "plan": saved["plan"], "saved_plan_id": plan_id}
 
     @mcp.tool(annotations=READ_ONLY)
     def get_job(job_id: str) -> dict[str, Any]:

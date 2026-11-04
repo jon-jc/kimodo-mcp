@@ -86,6 +86,9 @@ def _target(tmp_path):
 def _example_references(tmp_path):
     return {
         "input": {"job_id": "0" * 32, "other_job_id": "1" * 32, "sample_index": 0,
+                  "title": "Greeting take", "description": "Approach, stop and greet.",
+                  "selected_plan_id": "c" * 64,
+                  "request": {"segments": [{"text": "A person waves.", "duration": 2.0}]},
                   "name": "motion_00.npz", "other_name": "motion_00.npz", "attempt": 0,
                   "source_kind": "character", "source_frame": 10, "frame_indices": [0, 10, 20],
                   "offset_frames": 0, "space": "world", "target": _target(tmp_path),
@@ -97,6 +100,7 @@ def _example_references(tmp_path):
                   "revision": {"description": "A person makes a slower wave."},
                   "start_from": {"job_id": "0" * 32, "sample_index": 0, "frame": 10}},
         "steps": {"submit": {"id": "2" * 32}, "retry": {"id": "3" * 32}, "build": {"attempt": 0},
+                  "save": {"plan_id": "c" * 64},
                   "export": {"export_id": "a" * 64}, "variant": {"variant_id": "b" * 64},
                   "job": {"request": {"segments": [{"text": "A person waves.", "duration": 2.0}]}}},
     }
@@ -150,8 +154,22 @@ def test_discovery_import_does_not_load_inference_or_editor_modules():
     script = (
         "import sys; from kimodo_mcp.capabilities import build_capabilities, get_schema_definition, "
         "get_workflow_definition; build_capabilities([]); get_schema_definition('generate_request'); "
-        "get_workflow_definition('generate'); "
+        "get_workflow_definition('generate'); get_workflow_definition('saved-plans'); "
         "assert not any(n.split('.')[0] in {'torch', 'kimodo', 'bpy', 'unreal'} for n in sys.modules)"
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
+
+
+def test_saved_plan_recipe_keeps_authoring_separate_from_optional_generation():
+    recipe = get_workflow_definition("saved-plans")
+    steps = {step["id"]: step for step in recipe["steps"]}
+    assert steps["revision_preview"]["arguments"]["save"] is False
+    assert steps["revision_save"]["arguments"]["save"] is True
+    assert steps["submit"]["tool"] == "generate_animation_plan"
+    assert steps["submit"]["when"] and steps["workspace"]["when"]
+    assert steps["submit"]["arguments_from"]["plan_id"] == "input.selected_plan_id"
+    catalog = build_capabilities([])["saved_animation_plans"]
+    assert catalog["immutable"] is True
+    assert catalog["save_load_revision_require_runtime"] is False
+    assert catalog["request_schema"] in SCHEMA_IDS
