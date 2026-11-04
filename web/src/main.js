@@ -10,6 +10,8 @@ import { SequenceComposer } from './sequence-composer.js';
 import { retainSelectedJob, sourceIdentity } from './source-library-data.js';
 import { NativePanel } from './native-panel.js';
 import { composeNativeRequest, exportOptions } from './native-data.js';
+import { loadStudioModule } from './module-load.js';
+import { selectSubmittedJob as adoptSubmission, submissionSelection as captureSubmission } from './submission-data.js';
 
 const $ = id => document.getElementById(id);
 const state = { jobs: [], selected: null, sample: 0, variant: null, viewerMode: 'character', characterInfo: null, revision: null, revisionBase: null, connected: false, polling: false, previewUrl: null, previewLoaded: false, loadedInitial: false, jobSignature: '', comparisonSignature: '', selectionSignature: '', previews: new Map(), verifiedOutputs: new Map(), inspecting: 0, busy: new Set() };
@@ -35,31 +37,46 @@ $('dismiss-notice').addEventListener('click', () => { $('notice').hidden = true;
 let videoPanel;
 $('open-video-capture').addEventListener('click', async () => {
   try {
-    videoPanel ??= new (await import('./video-panel.js')).VideoPanel({ getToken });
+    videoPanel ??= new (await loadStudioModule(() => import('./video-panel.js'))).VideoPanel({ getToken });
     await videoPanel.open();
   } catch (error) { notice(error.message, true); }
+});
+let assetPanel, uniRigPanel;
+let toolboxPanel;
+$('open-toolbox').addEventListener('click', async () => {
+  try { toolboxPanel ??= new (await loadStudioModule(() => import('./toolbox-panel.js'))).ToolboxPanel({ onOpen: id => $(id)?.click() }); await toolboxPanel.open(); }
+  catch (error) { notice(error.message, true); }
+});
+$('open-assets').addEventListener('click', async () => {
+  try { assetPanel ??= new (await loadStudioModule(() => import('./asset-panel.js'))).AssetPanel();
+    await assetPanel.open({job_id: state.selected, sample_index:state.sample, variant_id:state.variant});
+  } catch(error) { notice(error.message, true); }
+});
+$('open-unirig').addEventListener('click', async () => {
+  try { uniRigPanel ??= new (await loadStudioModule(() => import('./unirig-panel.js'))).UniRigPanel(); await uniRigPanel.open(); }
+  catch(error) { notice(error.message, true); }
 });
 let freeMocapPanel;
 $('open-freemocap').addEventListener('click', async () => {
   try {
-    freeMocapPanel ??= new (await import('./freemocap-panel.js')).FreeMocapPanel();
+    freeMocapPanel ??= new (await loadStudioModule(() => import('./freemocap-panel.js'))).FreeMocapPanel();
     await freeMocapPanel.open();
   } catch (error) { notice(error.message, true); }
 });
 let sourceLibrary;
 $('open-source-library').addEventListener('click', async () => {
   try {
-    sourceLibrary ??= new (await import('./source-library.js')).SourceLibrary({ onOpen: openMotionSource });
+    sourceLibrary ??= new (await loadStudioModule(() => import('./source-library.js'))).SourceLibrary({ onOpen: openMotionSource });
     await sourceLibrary.open();
   } catch (error) { notice(error.message, true); }
 });
 async function openMotionSource(source) {
   sourceIdentity(source);
   if (source.source_kind === 'freemocap') {
-    freeMocapPanel ??= new (await import('./freemocap-panel.js')).FreeMocapPanel();
+    freeMocapPanel ??= new (await loadStudioModule(() => import('./freemocap-panel.js'))).FreeMocapPanel();
     await freeMocapPanel.openReceipt(source.source_id);
   } else if (source.source_kind === 'easymocap') {
-    videoPanel ??= new (await import('./video-panel.js')).VideoPanel({ getToken });
+    videoPanel ??= new (await loadStudioModule(() => import('./video-panel.js'))).VideoPanel({ getToken });
     await videoPanel.open();
     await videoPanel.select(source.source_id);
   } else {
@@ -411,15 +428,8 @@ $('new-plan').addEventListener('click', () => {
   invalidatePlan(); enableActions(); notice('New brief started with the visible actions. Saved constraints and advanced request settings are no longer attached.');
 });
 
-function submissionSelection() { return { key: currentKey(), epoch: state.selectionEpoch }; }
-function selectSubmittedJob(result, snapshot) {
-  // A late submission must not replace a candidate chosen while it was pending,
-  // including an A→B→A selection that happens to return to the same source key.
-  if (snapshot.epoch !== state.selectionEpoch || snapshot.key !== currentKey()) return;
-  const id = jobId(result.job ?? result);
-  if (!id) return;
-  state.selected = id; state.sample = 0; state.variant = null; state.selectionSignature = ''; state.selectionEpoch++;
-}
+function submissionSelection() { return captureSubmission(state); }
+function selectSubmittedJob(result, snapshot) { return adoptSubmission(state, result, snapshot); }
 
 $('create-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -445,7 +455,7 @@ $('create-form').addEventListener('submit', event => {
 function enableActions() {
   $('edit-skeleton').disabled = !completed();
   for (const id of ['review', 'compare', 'build-preview', 'send-blender', 'send-unreal', 'export-motion']) $(id).disabled = !completed() || !state.connected || state.busy.has(id);
-  for (const id of ['generate', 'plan', 'open-freemocap', 'open-video-capture', 'open-source-library']) $(id).disabled = !state.connected || state.busy.has(id);
+  for (const id of ['generate', 'plan', 'open-freemocap', 'open-video-capture', 'open-source-library', 'open-assets', 'open-unirig', 'open-toolbox']) $(id).disabled = !state.connected || state.busy.has(id);
   const job = current(), preview = selectedPreview(job, state.sample, state.variant);
   const matchingView = state.viewerMode === 'source' ? rigPanel?.loadedKey === currentKey() : state.previewLoaded && safeLocalUrl(preview?.url) === state.previewUrl;
   const unsavedPose = state.viewerMode === 'source' && rigPanel?.hasDraftPreview;

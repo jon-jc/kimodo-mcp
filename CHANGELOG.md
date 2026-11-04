@@ -2,6 +2,36 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-04 — Shared model assets, UniRig, props and complete tool controls
+
+### Added
+
+- A shared content-addressed asset library for GLB, FBX, OBJ and VRM, bounded local/browser imports, exact source verification, paginated history and explicit background-Blender GLB previews. Imports preserve original bytes and the existing animation-character registration.
+- Immutable scenes with up to 16 static world or character-bone attachments; meter positions, local XYZ rotations and per-axis scales; exact generated/capture-character source selection; recoverable preparation/build receipts; animated GLB/Blender output, separate static prop FBXs and a placement recipe.
+- A separate pinned UniRig runtime adapter for preprocessing, skeleton prediction, existing/edited-rig skinning, merging and complete sequential pipelines. Native controls include seed, face target, sampling toggle, token cap, beam count, top-k/top-p, temperature, repetition penalty, skin backend, output format and added root. Jobs preserve source/config/checkpoint/output identities, logs and cancellation state; verified results can return to the shared asset library.
+- Studio Assets & props and Rig a model workspaces with shared history, verified result recovery, playback/bone inspection, exact argument preservation and explicit planning/execution.
+- Workflow & tools: visual workspace shortcuts, searchable live tool groups, 20 ordered recipes with input/recovery guidance, individual controls, complete JSON arguments, full nested contracts and downloadable request/response receipts. Every registered tool uses the same validated implementation through Studio and MCP.
+- `get_tool_schema` and a six-source native-control inventory. Discovery now describes 103 tools, 20 recipes and 15 domain schemas, including explicit original-application and unavailable capabilities. Full native parity is not claimed.
+- Detailed asset/prop, UniRig, native coverage and workflow-library documentation; updated README/tool/schema tables and three real Studio screenshots.
+
+### Fixed
+
+- Rejected malformed/truncated GLB headers, wrong JSON/collection/URI types and unbundled external GLB resources; checked managed directory redirects before using outputs.
+- Rechecked the pinned UniRig runtime and saved request around each external stage and before output publication; rejected OBJ material references before UniRig execution so its source identity cannot omit those sidecars.
+- Stripped OBJ material directives with arbitrary whitespace in previews and prop imports. Preserved consecutive quaternion signs for attached-prop interpolation.
+- Prevented delayed asset previews, scene loads and recovery responses from replacing newer selections or reopened dialogs. Empty transform values no longer silently become zero; exact verified character attempts can be discovered, including an existing attempt 1.
+- Restored prepared prop handoffs for deliberate execution and corrected history status labels, pagination and imported-asset selection.
+- Disabled inactive tool fields during JSON editing so hidden invalid numbers cannot block a corrected request. Kept displayed responses and downloadable receipts synchronized across closing/reopening.
+- Added regression coverage for generation responses arriving after job/candidate/version changes and actionable stale-bundle recovery instructions that preserve the current draft.
+
+### Verification and scope
+
+- Fresh headless Blender builds passed on a 12-frame capture fixture at 24 FPS and an existing 120-frame generated wave at 30 FPS. Independent reopening found exactly unchanged matrices for all 24 character bones; maximum attachment matrix errors were below 0.000001. Quaternion signs remained continuous. This establishes export/attachment preservation, not artistic animation quality or natural gripping.
+- Checked the actual pinned UniRig configuration tree using 26 copied YAML files without loading a model, installing runtime dependencies or downloading weights. Live rigging inference and CUDA/model readiness remain unverified.
+- Browser checks covered exact-argument planning, recipe discovery, prop-scene recovery/playback/bones, missing-UniRig-runtime start gating, response recovery and narrow/tablet/desktop layouts without horizontal overflow.
+- Local automated checks passed: 1,123 Python tests with one platform skip, 153 frontend tests, Ruff and the production build. The Python suite includes actual MCP stdio/HTTP contracts, HTTP authorization and artifact-tamper tests. Cross-platform CI results are recorded in the delivery PR.
+- Arbitrary UniRig-to-character retargeting, Unreal prop socket conversion/import, two-hand IK, finger/face animation and physical contact repair remain outside this release. No live Unreal acceptance or real capture-processing run is claimed.
+
 ## 2026-11-03 — Native authoring controls and capture-to-character delivery
 
 ### Added

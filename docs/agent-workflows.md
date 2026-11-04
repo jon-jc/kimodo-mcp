@@ -1,6 +1,6 @@
 # Discover and use the complete MCP interface
 
-An assistant can discover the supported animation workflows through MCP itself. It does not need a copy of this repository, a browser session, or an installed model to read the catalog and input schemas. Kimodo generation, EasyMocap video fitting and FreeMoCap stages are registered by default in the same server for Claude Code, Codex and other MCP clients. Each execution path still needs its separately configured runtime; editor operations require their respective local connections.
+An assistant can discover the supported animation workflows through MCP itself. It does not need a copy of this repository, a browser session, or an installed model to read the catalog and input schemas. Kimodo generation, EasyMocap video fitting, FreeMoCap stages, model assets, prop scenes and UniRig rigging are registered by default in the same server for Claude Code, Codex and other MCP clients. Each execution path still needs its separately configured runtime; editor operations require their respective local connections.
 
 Start with these calls:
 
@@ -18,12 +18,16 @@ These examples show a tool name and its arguments; use the client's normal MCP t
 
 Discovery success is not proof that inference can run. A TCP listener does not prove that the intended editor project is open. A registered opening preview is an existing asset and is explicitly identified as such; it is not the result of the current prompt.
 
+Read one operation’s complete nested contract with `get_tool_schema(tool_name=...)`. Studio’s [Workflow & tools](workflow-toolbox.md) uses that same live registry. `get_capabilities.native_control_coverage` distinguishes managed controls, original-application controls and unavailable upstream features; full native parity is not claimed.
+
 ## Workflow recipes
 
 Call `get_workflow` with one of these identifiers:
 
 | Identifier | Purpose |
 | --- | --- |
+| `asset-props` | Import models, save world/bone placements, bind a verified character source and build/recover an animated scene. |
+| `unirig` | Check a separate UniRig runtime, predict/review skeletons and weights, and register verified outputs for later use. |
 | `native-workspace` | Inspect, explicitly start and stop the original pinned Kimodo UI; its state is separate from managed jobs. |
 | `capture-character` | Verify an exported FreeMoCap BVH, prepare bounded cleanup, execute the fitted-character Blender handoff, review and separately deliver to Unreal. |
 | `freemocap` | Plan and explicitly submit synchronization, import, calibration, processing or Blender export stages to the separate local service. |
@@ -63,6 +67,10 @@ Keep the actual job, sample, `source_kind`, and attempt consistent across prepar
 
 | Schema identifier | Describes |
 | --- | --- |
+| `prop_scene_request` | A title and up to 16 immutable static-asset world placements or fitted-character bone attachments. |
+| `prop_motion_source` | An exact Kimodo candidate/version/character attempt or verified capture-character handoff. |
+| `unirig_request` | Registered mesh/rig inputs, released stage, bounded native decoding and skin/merge controls. |
+| `capture_retarget_request` | Explicit BVH units/rest pose, trim, smoothing, joint corrections and fitted-character cleanup. |
 | `freemocap_request` | One explicit FreeMoCap stage, contained reference videos, measured calibration and bounded processing/export options. |
 | `video_mocap_request` | A local video, selected interval, frame rate and EasyMocap detector. |
 | `generate_request` | Advanced model, segments, sampling, exports, and kinematic constraints. |
