@@ -106,6 +106,7 @@ def _example_references(tmp_path):
                   "revision": {"description": "A person makes a slower wave."},
                   "start_from": {"job_id": "0" * 32, "sample_index": 0, "frame": 10}},
         "steps": {"submit": {"id": "2" * 32}, "retry": {"id": "3" * 32}, "build": {"attempt": 0},
+                  "plan": {"source": {"sha256": "a" * 64}},
                   "save": {"plan_id": "c" * 64},
                   "export": {"export_id": "a" * 64}, "variant": {"variant_id": "b" * 64},
                   "job": {"request": {"segments": [{"text": "A person waves.", "duration": 2.0}]}}},

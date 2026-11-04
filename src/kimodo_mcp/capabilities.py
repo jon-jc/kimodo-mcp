@@ -127,7 +127,7 @@ _RECIPES = {
                   arguments_from={"request": "input.video_request"},
                   on_failure="Resolve the reported operator setup or source-selection problem. No capture has started."),
             _step("submit", "start_video_mocap", "A separate capture job id is returned; this is not completion.",
-                  arguments_from={"request": "input.video_request"},
+                  arguments_from={"request": "input.video_request", "expected_source_sha256": "steps.plan.source.sha256"},
                   when="The user requested capture and the reviewed selection is ready.",
                   on_failure="Check list_video_mocap_jobs before retrying an uncertain submission."),
             _step("job", "get_video_mocap_job", "Poll until completed and output verification succeeds.",
