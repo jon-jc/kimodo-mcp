@@ -26,6 +26,7 @@ Call `get_workflow` with one of these identifiers:
 | --- | --- |
 | `freemocap` | Plan and explicitly submit synchronization, import, calibration, processing or Blender export stages to the separate local service. |
 | `video-mocap` | Check and fit a bounded single-person video with EasyMocap, inspect SMPL24 frames and retrieve verified artifacts. |
+| `resume-motion` | Find work from any client, preserve its source family, and inspect verified native or captured frames. |
 | `generate` | Plan a natural brief, submit it, track completion, and review candidates. |
 | `saved-plans` | Save an exact request, preview revisions, retain child plans and submit only when intended. |
 | `revise` | Change selected fields while preserving the original request and outputs. |
@@ -235,3 +236,9 @@ Dependency installation, authentication, model-download permission, worker start
 The browser still owns interactive viewing controls such as orbiting, scrubbing, playback speed, and wireframe display. An agent can create and locate the same verified previews through MCP without pretending that a background tool call is a visual inspection. Discovery and recipe retrieval do not alter motion, load model weights, or execute editor scripts.
 
 If a client has an older cached tool list, reconnect it or start a new client session and call `get_capabilities` again. Compare the returned inventory with the operations you intend to use; do not invent a tool because it appears in an upstream README. See [client configuration](clients.md) for stdio and local Streamable HTTP connections.
+
+## Continue captured or generated work from another client
+
+Call `list_motion_sources` before creating replacement work. Filter by `kimodo`, `easymocap` or `freemocap`, and follow `next_offset` for later pages. Each entry contains its source kind and ID, recorded status, and the matching status/review tool arguments. The list is metadata only; `verification="not_checked"` prevents historical completion from being mistaken for current file verification. Use `get_workflow("resume-motion")` to follow the appropriate branch.
+
+For a completed verified FreeMoCap process/export receipt, `inspect_freemocap_frames` reads body, hand or face positions and missing-value masks; `analyze_freemocap_quality` supplies body coverage and movement diagnostics with original review frames. `get_freemocap_artifact` verifies an exact output path before handing it to another application. These reads work offline once the result is verified, with registered storage still present. Pending/unknown stages still require live completion evidence. See the [capture-review guide](capture-review.md).

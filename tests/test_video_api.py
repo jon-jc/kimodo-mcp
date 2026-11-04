@@ -55,8 +55,8 @@ async def test_capture_catalog_and_readiness_do_not_launch(settings, monkeypatch
     monkeypatch.setattr(capture.subprocess, "Popen", lambda *a, **k: pytest.fail("Unexpected runtime launch"))
     server = create_server(settings)
     catalog = await call(server, "get_capabilities", {})
-    assert catalog["tool_count"] == 64
-    assert len(catalog["schemas"]) == 11 and len(catalog["workflows"]) == 15
+    assert catalog["tool_count"] == 68
+    assert len(catalog["schemas"]) == 11 and len(catalog["workflows"]) == 16
     assert set(video_api.TOOL_NAMES) <= {tool["name"] for tool in catalog["tools"]}
     result = await call(server, "plan_video_mocap", {"request": {"video_path": str(settings.data_dir / "absent.mp4")}})
     assert result["ready"] is False

@@ -7,6 +7,7 @@ import { RigPanel } from './rig-panel.js';
 import { selectedDownloads, selectedPreview as previewFor, sourceKey, variantArgs } from './rig-data.js';
 import { friendlyPlanningError, needsFreshSeed, PlanGate, savedPlanMetadata, savedPlanRoute, savedSequenceNotes, sharedFrameTime, STARTER_SEQUENCES, WORKFLOW_STEPS, workflowKey, workflowState } from './sequence.js';
 import { SequenceComposer } from './sequence-composer.js';
+import { retainSelectedJob, sourceIdentity } from './source-library-data.js';
 
 const $ = id => document.getElementById(id);
 const state = { jobs: [], selected: null, sample: 0, variant: null, viewerMode: 'character', characterInfo: null, revision: null, revisionBase: null, connected: false, polling: false, previewUrl: null, previewLoaded: false, loadedInitial: false, jobSignature: '', comparisonSignature: '', selectionSignature: '', previews: new Map(), verifiedOutputs: new Map(), inspecting: 0, busy: new Set() };
@@ -43,6 +44,30 @@ $('open-freemocap').addEventListener('click', async () => {
     await freeMocapPanel.open();
   } catch (error) { notice(error.message, true); }
 });
+let sourceLibrary;
+$('open-source-library').addEventListener('click', async () => {
+  try {
+    sourceLibrary ??= new (await import('./source-library.js')).SourceLibrary({ onOpen: openMotionSource });
+    await sourceLibrary.open();
+  } catch (error) { notice(error.message, true); }
+});
+async function openMotionSource(source) {
+  sourceIdentity(source);
+  if (source.source_kind === 'freemocap') {
+    freeMocapPanel ??= new (await import('./freemocap-panel.js')).FreeMocapPanel();
+    await freeMocapPanel.openReceipt(source.source_id);
+  } else if (source.source_kind === 'easymocap') {
+    videoPanel ??= new (await import('./video-panel.js')).VideoPanel({ getToken });
+    await videoPanel.open();
+    await videoPanel.select(source.source_id);
+  } else {
+    const epoch = ++state.selectionEpoch;
+    const job = await request(`/api/jobs/${source.source_id}`);
+    if (epoch !== state.selectionEpoch) return;
+    state.jobs = [job, ...state.jobs.filter(item => jobId(item) !== source.source_id)];
+    await selectJob(source.source_id);
+  }
+}
 
 function viewerMessage(title, detail) {
   $('viewer-message').hidden = false;
@@ -386,7 +411,7 @@ $('create-form').addEventListener('submit', event => {
 function enableActions() {
   $('edit-skeleton').disabled = !completed();
   for (const id of ['review', 'compare', 'build-preview', 'send-blender', 'send-unreal', 'export-motion']) $(id).disabled = !completed() || !state.connected || state.busy.has(id);
-  for (const id of ['generate', 'plan', 'open-freemocap', 'open-video-capture']) $(id).disabled = !state.connected || state.busy.has(id);
+  for (const id of ['generate', 'plan', 'open-freemocap', 'open-video-capture', 'open-source-library']) $(id).disabled = !state.connected || state.busy.has(id);
   const job = current(), preview = selectedPreview(job, state.sample, state.variant);
   const matchingView = state.viewerMode === 'source' ? rigPanel?.loadedKey === currentKey() : state.previewLoaded && safeLocalUrl(preview?.url) === state.previewUrl;
   const unsavedPose = state.viewerMode === 'source' && rigPanel?.hasDraftPreview;
@@ -605,7 +630,16 @@ async function refresh() {
   state.polling = true;
   try {
     const result = await request('/api/state'); setToken(result.csrf_token);
-    state.connected = true; state.jobs = Array.isArray(result.jobs) ? result.jobs : [];
+    state.connected = true;
+    const recent = Array.isArray(result.jobs) ? result.jobs : [];
+    state.jobs = retainSelectedJob(recent, state.selected, state.jobs);
+    const selected = state.selected;
+    if (selected && !recent.some(job => jobId(job) === selected)) {
+      try {
+        const older = await request(`/api/jobs/${selected}`);
+        if (state.selected === selected) state.jobs = [older, ...state.jobs.filter(job => jobId(job) !== selected)];
+      } catch { /* Keep the selected take visible; its review reports missing or changed artifacts. */ }
+    }
     $('connection').textContent = 'Connected';
     const health = result.health ?? {}, worker = health.worker_service ?? result.worker ?? {};
     const ready = worker.available ?? worker.running ?? worker.status === 'ready';

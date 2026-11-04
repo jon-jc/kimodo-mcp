@@ -49,6 +49,17 @@
 .fmc-file-list span { font-size:10px; color:#98afc5; }
 .freemocap-dialog pre { max-height:260px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; line-height:1.6; }
 .freemocap-dialog a { color:#abd4e8; }
+.fmc-review { grid-column:1/-1; border-top:1px solid #425568; margin-top:22px; padding-top:20px; min-width:0; scroll-margin-top:16px; }
+.fmc-landmark-viewport { height:320px; position:relative; overflow:hidden; border:1px solid #435063; border-radius:9px; background:radial-gradient(ellipse at 50% 35%,#293443,#141b24); min-width:0; }
+.fmc-landmark-viewport canvas { display:block; width:100%; height:100%; }
+.fmc-playback { display:flex; gap:10px; align-items:center; margin-top:12px; flex-wrap:wrap; }
+.fmc-playback input[type=range] { flex:1 1 100px; min-width:80px; width:0; }
+.fmc-window-controls { display:flex; gap:8px; align-items:flex-end; flex-wrap:wrap; margin:14px 0; }
+.fmc-window-controls label { flex:1 1 135px; min-width:0; font-size:11px; line-height:1.6; color:#b5c2d4; }
+.fmc-window-controls input { margin-top:5px; width:100%; }
+.fmc-window-controls button { min-height:35px; }
+.fmc-review-frames { display:flex; flex-wrap:wrap; gap:7px; margin-top:12px; }
+.fmc-review .small-button { white-space:normal; }
 @media(max-width:1000px) { .fmc-stages { grid-template-columns:repeat(3,minmax(0,1fr)); } .fmc-workspace { gap:18px; grid-template-columns:minmax(0,330px) minmax(0,1fr); } }
 @media(max-width:760px) { .freemocap-dialog { padding:16px; } .fmc-workspace { grid-template-columns:minmax(0,1fr); } .fmc-readiness button { margin-left:0; } .fmc-stage { padding:9px 7px; } .fmc-stage strong { font-size:10px; } }
 @media(max-width:430px) { .fmc-stages { grid-template-columns:repeat(2,minmax(0,1fr)); } .fmc-heading { gap:8px; } .fmc-receipt-entry { flex-wrap:wrap; } .fmc-receipt-entry input { width:100%; flex-basis:100%; } }

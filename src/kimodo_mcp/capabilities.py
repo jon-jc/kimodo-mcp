@@ -25,7 +25,7 @@ from .video_mocap import VideoMocapRequest
 
 WorkflowName = Literal[
     "generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans", "video-mocap", "freemocap",
+    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans", "video-mocap", "freemocap", "resume-motion",
 ]
 SchemaName = Literal[
     "generate_request", "animation_brief", "animation_revision", "pose_reference",
@@ -52,7 +52,8 @@ _GROUPS = {
     "freemocap": (
         "Plan and submit explicit stages to a separate local FreeMoCap service",
         ("get_freemocap_capabilities", "list_freemocap_recordings", "inspect_freemocap_recording",
-         "plan_freemocap_capture", "start_freemocap_capture", "get_freemocap_job", "cancel_freemocap_job"),
+         "plan_freemocap_capture", "start_freemocap_capture", "get_freemocap_job", "cancel_freemocap_job",
+         "inspect_freemocap_frames", "analyze_freemocap_quality", "get_freemocap_artifact"),
     ),
     "video_mocap": (
         "Capture and review single-person local video",
@@ -62,7 +63,7 @@ _GROUPS = {
     "discovery": (
         "Discover capabilities and workspace readiness",
         ("get_capabilities", "get_workflow", "get_input_schema", "list_models", "health_check",
-         "get_workspace_state", "get_character_profile", "get_unreal_target"),
+         "get_workspace_state", "get_character_profile", "get_unreal_target", "list_motion_sources"),
     ),
     "generation": (
         "Plan, generate and revise motion",
@@ -125,6 +126,40 @@ def _handoff_args(source_kind: str) -> tuple[dict, dict]:
 
 
 _RECIPES = {
+    "resume-motion": {
+        "title": "Find and inspect existing work across generation and capture",
+        "inputs": {"job_id": "Select an actual source_id from history, retaining its source_kind.",
+                   "source_kind": "kimodo, easymocap or freemocap; these IDs and representations are not interchangeable."},
+        "requirements": ["Shared local data directory; history does not need running model or capture services.",
+                         "A historical status is not fresh output verification. Never retry an uncertain submission from history."],
+        "steps": [
+            _step("history", "list_motion_sources", "Find recorded takes and stage receipts, including work from another client.",
+                  arguments={"source_kind": "all", "limit": 30},
+                  on_failure="Use the source-kind filter and pagination; partial history reports its bounded scan limit."),
+            _step("native", "get_job", "Read current native status and select the desired sample/version.",
+                  arguments_from={"job_id": "input.job_id"}, when="Selected source_kind is kimodo."),
+            _step("native_frames", "inspect_motion_frames", "Verify exact source positions before choosing a correction or export workflow.",
+                  arguments={"frame_indices": [0], "sample_index": 0}, arguments_from={"job_id": "input.job_id"},
+                  when="Selected source_kind is kimodo and the requested sample is completed."),
+            _step("video", "get_video_mocap_job", "Verify the completed video capture and its output receipt.",
+                  arguments_from={"job_id": "input.job_id"}, when="Selected source_kind is easymocap."),
+            _step("video_frames", "inspect_video_mocap_frames", "Read SMPL24 positions and original detection evidence.",
+                  arguments={"frame_indices": [0]}, arguments_from={"job_id": "input.job_id"},
+                  when="Selected source_kind is easymocap and output verification succeeded."),
+            _step("capture", "get_freemocap_job", "Read the exact stage receipt; completed process/export reads work offline.",
+                  arguments_from={"job_id": "input.job_id"}, when="Selected source_kind is freemocap."),
+            _step("capture_quality", "analyze_freemocap_quality", "Identify body gaps and motion outliers using native units and available timing.",
+                  arguments_from={"job_id": "input.job_id"},
+                  when="Selected source_kind is freemocap and a process/export receipt is verified completed."),
+            _step("capture_frames", "inspect_freemocap_frames", "Inspect exact body landmarks; repeat at reported problem frames or select hands/face.",
+                  arguments={"frame_indices": [0], "aspect": "body"}, arguments_from={"job_id": "input.job_id"},
+                  when="Selected source_kind is freemocap and a process/export receipt is verified completed."),
+        ],
+        "completion": "The selected source is identified and its appropriate review evidence is available. No processing, conversion or editor action was submitted.",
+        "notes": ["Use original frame indices; missing landmarks are not zero poses.",
+                  "FreeMoCap points do not supply local rig rotations. Use explicit supported export and character retargeting.",
+                  "Recover submission_unknown receipts before planning another write; saved metadata alone cannot resolve pending work."],
+    },
     "freemocap": {
         "title": "Review and submit one explicit FreeMoCap post-processing stage",
         "inputs": {"freemocap_request": "A freemocap_request for check_sync, synchronize, import, calibrate, process or export."},
@@ -148,6 +183,12 @@ _RECIPES = {
             _step("inspect", "inspect_freemocap_recording", "Review actual contained output hashes and upstream readiness independently of visual quality.",
                   arguments_from={"recording_id": "steps.capture.recording_id"},
                   when="This stage returned a recording_id; synchronization-only stages do not create a recording."),
+            _step("quality", "analyze_freemocap_quality", "Review body gaps and movement outliers without a runtime or automatic quality score.",
+                  arguments_from={"job_id": "steps.capture.job_id"},
+                  when="The completed stage is process or export and its receipt is verified."),
+            _step("frames", "inspect_freemocap_frames", "Inspect original landmark frames before downstream export or retargeting.",
+                  arguments={"frame_indices": [0]}, arguments_from={"job_id": "steps.capture.job_id"},
+                  when="The completed stage is process or export and its receipt is verified."),
         ],
         "completion": "One explicit stage has a verified outcome. Processing does not automatically export or retarget a character.",
         "notes": ["Import assigns a new recording; use its exact recording_id in later stages.",
@@ -619,6 +660,17 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
         "schema_version": 1, "reviewed_revision": UPSTREAM_REVISION,
         "tool_count": len(by_name), "tools": [by_name[name] for name in sorted(by_name)], "tool_groups": groups,
         "models": list_models(),
+        "source_families": {
+            "history_tool": "list_motion_sources", "resume_workflow": "resume-motion",
+            "kimodo": {"identity": "job_id + sample_index + optional variant_id", "representation": "model-specific skeletal motion; SOMA corrections require SOMA30/77",
+                       "inspect": "inspect_motion_frames", "quality": "analyze_motion_quality", "export": "export_motion"},
+            "easymocap": {"identity": "video capture job_id", "representation": "estimated SMPL24 body rotations/positions",
+                          "inspect": "inspect_video_mocap_frames", "export": "get_video_mocap_artifact", "requires_character_retargeting": True},
+            "freemocap": {"identity": "verified process/export receipt job_id", "representation": "body/hand/face landmark positions with missing-value masks",
+                          "inspect": "inspect_freemocap_frames", "quality": "analyze_freemocap_quality", "artifact": "get_freemocap_artifact",
+                          "local_rotations_available": False, "requires_character_retargeting": True},
+            "interchangeable_ids": False, "implicit_conversion": False,
+        },
         "freemocap": {"request_schema": "freemocap_request", "workflow": "freemocap",
                       "reviewed_revision": FREEMOCAP_REVISION, "reviewed_version": FREEMOCAP_VERSION,
                       "license": "AGPL-3.0", "separate_runtime": True, "automatic_runtime_start": False,

@@ -32,8 +32,9 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Precise rig corrections | Inspect all source joints, groups and local axes; save bounded local rotation corrections with smooth frame-window blends, trimming and planar placement. |
 | Numerical assessment | Apply explicit project limits to up to eight takes; inspect problem windows and unavailable evidence without an automatic quality ranking. |
 | Video reference capture | Use a separate EasyMocap runtime for bounded single-video body fitting, explicit short-occlusion estimates, confidence review and verified SMPL24/BVH outputs. |
+| Shared motion library | Find generated takes and both capture histories across browsers and agents, recover stage receipts, and open the exact source workflow. Recorded status is explicitly separate from fresh output verification. |
 | FreeMoCap capture | Check and synchronize videos, import a take, calibrate cameras, track detailed landmarks, inspect saved results and explicitly export through Blender using shared Studio/MCP controls. |
-| MCP interface | Use 64 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| MCP interface | Use 68 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
 
@@ -196,7 +197,7 @@ See [the full studio guide](docs/studio.md), [natural-language workflow](docs/na
 
 ## FreeMoCap: reconstruct a recorded performance
 
-Open **Create → Open capture workspace** to work through video checking, synchronization, import, camera calibration, landmark processing and explicit Blender export. Each stage has its own settings, reviewed plan and receipt. The same seven operations are available over MCP, so an agent can inspect and continue a take started in the Studio.
+Open **Create → Open capture workspace** to work through video checking, synchronization, import, camera calibration, landmark processing and explicit Blender export. Each stage has its own settings, reviewed plan and receipt. The same stage and review operations are available over MCP, so an agent can inspect and continue a take started in the Studio.
 
 ![FreeMoCap workspace with tracking, calibration and stage receipt controls](docs/images/studio-freemocap-workspace.jpg)
 
@@ -233,12 +234,34 @@ The current FreeMoCap Blender export supports **MediaPipe only**. RTMPose remain
 
 Landmark arrays, CSV/Parquet measurements, calibration files and optional `.blend`/FBX/BVH outputs remain distinct from the project's native Kimodo corrections and registered-character handoff. The adapter does not provide automatic SOMA conversion, a facial blendshape solver, general character retargeting or automatic Unreal skeleton compatibility. Better source footage and measured calibration support better reconstruction; the bridge does not promise AAA-quality motion.
 
+### Inspect the saved performance before export
+
+![Shared motion library showing saved sources and workflow filtering](docs/images/studio-source-library.jpg)
+
+*The shared library recovers existing workspace records. This screenshot shows saved Kimodo takes; EasyMocap captures and FreeMoCap stages appear here when present in the same configured workspace.*
+
+![Saved FreeMoCap body landmark review with original-frame controls and native-coordinate inspection](docs/images/studio-capture-review-fixture.jpg)
+
+*Actual Studio controls displaying a deliberately synthetic planar test recording. This example demonstrates frame navigation, landmark selection and missing-data handling; it is not reconstructed footage or evidence of capture accuracy.*
+
+Open **All motion sources** from the Studio workflow bar to find Kimodo takes, EasyMocap captures and FreeMoCap stage receipts together. The paginated library reads saved metadata without contacting an inference or capture runtime. Each entry keeps its workflow identity and recorded status; opening it uses that workflow's verified reader. An uncertain submission remains unresolved rather than becoming an automatic retry. You can continue work started in another browser or agent without remembering its receipt ID.
+
+For a verified FreeMoCap processing or export receipt, **Body landmark review** displays the saved body points with playback, exact original-frame selection and contiguous preview windows. **Previous window** and **Next window** let you inspect long takes without silently skipping frames. Missing points and their connections disappear rather than becoming origin points. Clicking a landmark identifies its native coordinates and whether it is detector-derived or a computed virtual center. Legacy receipts without persisted frame rate support frame inspection instead of invented playback timing.
+
+Quality diagnostics show valid-output coverage, longest missing runs, adjacent-frame movement and suggested original frames to inspect. They preserve pixel, millimeter or unknown calibration units. Validity after interpolation is not tracking confidence, and a motion outlier is not automatically a bad performance. The browser visualizes the body; agents can additionally inspect saved left-hand, right-hand and face positions through the same receipt-bound API. These are landmark trajectories, not an editable articulated character rig or facial blendshape animation.
+
+Verified completed processing/export receipts, frame inspection, diagnostics and artifact retrieval work with the external FreeMoCap service stopped. Its registered folders, original source files and unchanged outputs must still be accessible. Pending work needs the service to resolve its actual outcome. See the [capture review and agent continuity guide](docs/capture-review.md) for units, masks, limits and recovery examples.
+
 ### Control the workflow from an agent
 
-Start with `get_capabilities`, then `get_workflow("freemocap")` and `get_input_schema("freemocap_request")`. The schema covers the six explicit stage types. Supply only fields applicable to the selected stage. `plan_freemocap_capture` validates the stage without submitting it; `start_freemocap_capture` is the separate execution step.
+Start with `get_capabilities` and `list_motion_sources` to recover existing work. Use `get_workflow("resume-motion")` for source-specific review, or `get_workflow("freemocap")` and `get_input_schema("freemocap_request")`. The schema covers the six explicit stage types. Supply only fields applicable to the selected stage. `plan_freemocap_capture` validates the stage without submitting it; `start_freemocap_capture` is the separate execution step.
 
 | Tool | Agent use |
 | --- | --- |
+| `list_motion_sources` | Recover paginated recorded history across all three workflows, without runtime calls. |
+| `inspect_freemocap_frames` | Inspect up to 16 exact body, hand or face frames, preserving missing-value masks and native units. |
+| `analyze_freemocap_quality` | Measure body output coverage and adjacent-frame movement; obtain original problem-frame suggestions. |
+| `get_freemocap_artifact` | Verify and locate an exact file from a completed processing/export receipt. |
 | `get_freemocap_capabilities` | Check the configured service, reviewed version, route compatibility, status extension and limits. |
 | `list_freemocap_recordings` | Find recordings inside the registered recording root. |
 | `inspect_freemocap_recording` | Inspect observed readiness and contained output sizes and hashes. |
@@ -322,7 +345,7 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **64 tools**, **15 workflow recipes** and **11 input schemas**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, native-job and separate video-capture state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **68 tools**, **16 workflow recipes** and **11 input schemas**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, native-job and separate video-capture state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
@@ -642,6 +665,7 @@ Build the frontend before building a distributable Python wheel. It writes `web/
 | [Studio](docs/studio.md) | Controls, setup, registration, memory, and recovery. |
 | [Clients](docs/clients.md) | Codex, Claude Code/Desktop, and local HTTP. |
 | [Natural-language workflow](docs/natural-workflow.md) | Briefs, presets, beats, revisions, and pose reuse. |
+| [Capture review and agent continuity](docs/capture-review.md) | Shared history, offline landmark review, exact frame inspection, native units and verification boundaries. |
 | [FreeMoCap workflow](docs/freemocap.md) | Recorded-performance stages, external runtime, calibration, detailed tracking controls, receipts and export limits. |
 | [EasyMocap video capture](docs/easymocap.md) | Single-video setup, estimation, synchronized review and verified SMPL24/BVH output. |
 | [Capture source audit](docs/mocap-source-audit.md) | EasyMocap source mapping, adopted functions and excluded paths. |

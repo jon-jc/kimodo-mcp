@@ -696,6 +696,8 @@ def start_freemocap_capture(settings: Settings, request: FreeMocapRequest) -> di
             "notes": plan["notes"],
             "status_instance_id": extension["instance_id"] if extension else None,
         }
+        if request.operation == "process":
+            receipt["video_metadata"] = plan["video_metadata"]
         atomic_json(path, receipt)
         try:
             response = client._request(
@@ -851,7 +853,14 @@ def get_freemocap_job(settings: Settings, job_id: str) -> dict:
             receipt["pipeline_completion_verified"] = True
         atomic_json(path, receipt)
     if receipt.get("recording_id") and (client.recordings / receipt["recording_id"]).is_dir():
-        receipt["recording"] = inspect_freemocap_recording(settings, receipt["recording_id"])
+        if receipt.get("status") == "completed" and receipt.get("pipeline_completion_verified") is True:
+            receipt["recording"] = {
+                "recording_id": receipt["recording_id"],
+                "outputs": receipt.get("outputs", []),
+                "upstream_readiness": {"available": False, "reason": "Not queried for verified saved results"},
+            }
+        else:
+            receipt["recording"] = inspect_freemocap_recording(settings, receipt["recording_id"])
     return receipt
 
 
