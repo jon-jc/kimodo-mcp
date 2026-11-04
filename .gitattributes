@@ -1,0 +1,4 @@
+# These exact helper bytes are part of immutable asset/prop receipts.
+# Keep checkout identity stable even when core.autocrlf is enabled on Windows.
+src/kimodo_mcp/handoff_scripts/asset_preview.py text eol=lf
+src/kimodo_mcp/handoff_scripts/prop_scene.py text eol=lf
