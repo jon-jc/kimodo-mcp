@@ -1,6 +1,7 @@
 let csrfToken = '';
 
 export function setToken(value) { csrfToken = typeof value === 'string' ? value : ''; }
+export function getToken() { return csrfToken; }
 
 export async function request(path, args) {
   const response = await fetch(path, {

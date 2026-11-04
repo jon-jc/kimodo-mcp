@@ -1,7 +1,7 @@
 import './styles.css';
 import './rig.css';
 import './sequence.css';
-import { action, anchorFrame, buildBrief, description, duration, jobId, request, revisionChanges, safeLocalUrl, sampleCount, sampleName, setToken } from './api.js';
+import { action, anchorFrame, buildBrief, description, duration, getToken, jobId, request, revisionChanges, safeLocalUrl, sampleCount, sampleName, setToken } from './api.js';
 import { MotionViewer } from './viewer.js';
 import { RigPanel } from './rig-panel.js';
 import { selectedDownloads, selectedPreview as previewFor, sourceKey, variantArgs } from './rig-data.js';
@@ -29,6 +29,13 @@ function notice(message, error = false) {
   $('notice-text').textContent = message; $('notice').classList.toggle('error', error); $('notice').hidden = false;
 }
 $('dismiss-notice').addEventListener('click', () => { $('notice').hidden = true; });
+let videoPanel;
+$('open-video-capture').addEventListener('click', async () => {
+  try {
+    videoPanel ??= new (await import('./video-panel.js')).VideoPanel({ getToken });
+    await videoPanel.open();
+  } catch (error) { notice(error.message, true); }
+});
 
 function viewerMessage(title, detail) {
   $('viewer-message').hidden = false;

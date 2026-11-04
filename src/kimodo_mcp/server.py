@@ -44,6 +44,8 @@ from .quality import analyze_motion, compare_motion
 from .review import compare_motion_reviews
 from .review import create_motion_review as create_review_file
 from .schemas import GenerateRequest, QualityThresholds
+from .video_api import register_video_tools
+from .video_mocap import list_video_mocap_jobs
 from .workspace import Workspace, handoff_directory_name
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False)
@@ -80,7 +82,9 @@ def create_server(
             "Use build_character_preview for the registered character, list_job_outputs for verified exports, "
             "and explicit matching project/rig targets for Unreal. Never blindly retry uncertain editor dispatch. "
             "Discovery does not establish runtime, memory, model access or editor readiness. Independent-worker "
-            "jobs survive client disconnects. NPZ coordinates are meters, Y-up, +Z forward, frames zero-based. "
+            "jobs survive client disconnects. Kimodo NPZ coordinates are meters, Y-up, +Z forward, frames zero-based. "
+            "For local video use plan_video_mocap before explicit start_video_mocap; these separate capture jobs "
+            "produce camera-relative SMPL24 with estimated scale, not SOMA character animation. "
             "This server does not create meshes or automatically fit arbitrary characters."
         ),
         host="127.0.0.1", port=port,
@@ -167,6 +171,7 @@ def create_server(
             "unreal_target": workspace.project_target(),
             "jobs": store.list(recent_jobs) if recent_jobs else [],
             "saved_plans": saved_plans.list(),
+            "video_mocap_jobs": list_video_mocap_jobs(settings, recent_jobs) if recent_jobs else {"jobs": [], "total": 0},
             "opening_preview": {"path": str(preview), "uri": preview.as_uri(),
                                 "source": "operator_registered_preview", "generated_for_current_request": False}
             if preview else None,
@@ -1013,6 +1018,7 @@ def create_server(
             "never attach SOMA animation directly to an unrelated skeleton."
         )
 
+    register_video_tools(mcp, settings)
     return mcp
 
 

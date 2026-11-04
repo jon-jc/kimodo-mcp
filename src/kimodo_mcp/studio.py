@@ -23,6 +23,8 @@ from .capacity import capacity_snapshot, editor_connections
 from .config import Settings
 from .jobs import JobStore, contained_file, redact
 from .server import create_server
+from .video_api import TOOL_NAMES as VIDEO_TOOL_NAMES
+from .video_api import video_routes
 from .workspace import DOWNLOAD_PATH as _DOWNLOAD
 from .workspace import Workspace
 
@@ -74,6 +76,7 @@ _ACTIONS = {
     "revise_motion_variant",
     "get_motion_variant",
     "inspect_motion_rig",
+    *VIDEO_TOOL_NAMES,
 }
 
 
@@ -152,6 +155,7 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
                     "character": profile,
                     "targets": {"unreal": workspace.project_target()},
                     "health": health,
+                    "video_mocap_jobs": await invoke("list_video_mocap_jobs", {"limit": 20}),
                     "csrf_token": csrf,
                     "presets": [
                         {
@@ -291,6 +295,7 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
             Route("/api/actions/{tool}", action, methods=["POST"]),
             Route("/api/character/model.glb", initial_character),
             Route("/api/files/{job_id}/{path:path}", download),
+            *video_routes(settings, csrf),
             Route("/{path:path}", web),
         ]
     )

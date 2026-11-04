@@ -10,7 +10,7 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 
 *The studio separates authoring a plan from viewing an existing animation. A validated sequence describes future generation; it does not replace the character's currently selected saved motion. Character assets, model weights, credentials, and local project files are not included in this repository.*
 
-[Getting started](#getting-started-on-windows) · [Studio workflow](#work-in-the-browser-studio) · [MCP tools](#mcp-tools) · [Agent workflows](docs/agent-workflows.md) · [Architecture](#how-it-works) · [Limitations](#scope-and-limitations) · [Troubleshooting](#troubleshooting)
+[Getting started](#getting-started-on-windows) · [Studio workflow](#work-in-the-browser-studio) · [Video references](#capture-a-video-reference) · [MCP tools](#mcp-tools) · [Agent workflows](docs/agent-workflows.md) · [Architecture](#how-it-works) · [Limitations](#scope-and-limitations) · [Troubleshooting](#troubleshooting)
 
 ## What this project provides
 
@@ -31,7 +31,8 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Downloads | Retrieve original motion, animated GLB, skeletal mesh/animation FBX, and Blender projects when available. |
 | Precise rig corrections | Inspect all source joints, groups and local axes; save bounded local rotation corrections with smooth frame-window blends, trimming and planar placement. |
 | Numerical assessment | Apply explicit project limits to up to eight takes; inspect problem windows and unavailable evidence without an automatic quality ranking. |
-| MCP interface | Use 49 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| Video reference capture | Use a separate EasyMocap runtime for bounded single-video body fitting, explicit short-occlusion estimates, confidence review and verified SMPL24/BVH outputs. |
+| MCP interface | Use 57 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
 
@@ -180,6 +181,33 @@ The interface adapts to narrow browser windows. It remains a local desktop workf
 
 See [the full studio guide](docs/studio.md), [natural-language workflow](docs/natural-workflow.md), and [structured animation workflows](docs/animation-workflows.md).
 
+## Capture a video reference
+
+Open **Create → From video · EasyMocap**. Choose a local file (the browser copies up to 512 MiB into the local reference library), or enter a full path to a video up to 2 GiB. Select a start time, duration, frame rate and body detector, then **Check video & setup**. The checker identifies missing runtime/model files without downloading or processing them. A ready plan enables **Capture this motion**; starting rechecks the source checksum and creates a separate durable video job.
+
+The fixed pipeline samples 6–2,400 frames, detects BODY25 landmarks, initializes and fits an SMPL body with temporal regularization, normalizes its actual shaped skeleton, and writes a meter-based BVH with the requested frame rate. Captures do not occupy or start the Kimodo generation worker. Progress, bounded logs, cancellation, detected/problem frames, confidence, reference video, skeleton review and verified downloads are available through both the Studio and MCP.
+
+For imperfect footage, **Brief occlusions** can explicitly bridge up to 15 missing internal frames using low-confidence 2D interpolation. The default is strict detection. Estimates retain their original detection records, source times and inference flags; ambiguous people, long gaps, endpoints and unusable geometry remain unresolved. This is an aid for short gaps, not reliable recovery of arbitrary unseen action.
+
+The review pairs the exact analyzed video with the SMPL24 skeleton. Scrubbing and playback share time; confidence identifies BODY25 image observations and bridged frames, rather than inventing certainty for the fitted 3D joints. Downloads are bound to a completed receipt and source/output hashes. Use the BVH in Blender for explicit retargeting, then validate your character's scale, rest pose, contacts and root motion before Unreal import. The existing automatic SOMA character handoff does not accept SMPL24 captures.
+
+![Video review interface exercised with a synthetic test-pattern video and synthetic skeleton fixture](docs/images/studio-video-review-fixture.jpg)
+
+*This screenshot shows an isolated synthetic interface test. The color bars and skeleton were supplied as test data; they are not a real video reconstruction.*
+
+| Capture tool | Purpose |
+| --- | --- |
+| `plan_video_mocap` | Check source, bounded settings, pinned external runtime, dependencies and model assets. |
+| `start_video_mocap` | Explicitly start a capture; pass the checked `expected_source_sha256`. |
+| `get_video_mocap_job` / `list_video_mocap_jobs` | Read stage, diagnostics, separate capture history and completion receipt. |
+| `get_video_mocap_log` / `cancel_video_mocap_job` | Inspect bounded logs or request scoped cancellation. |
+| `inspect_video_mocap_frames` | Inspect up to 16 poses with source times, 2D confidence and estimated-frame flags. |
+| `get_video_mocap_artifact` | Retrieve a verified reference, NPZ, BVH, parameters, detections, timing or diagnostic file. |
+
+Use `get_workflow("video-mocap")` and `get_input_schema("video_mocap_request")` for the exact agent contract. See [EasyMocap installation, examples and limitations](docs/easymocap.md) and the [source-by-source integration audit](docs/mocap-source-audit.md).
+
+**Runtime and evidence:** EasyMocap and its separately licensed body models are not bundled. The integration has synthetic numerical, lifecycle, protocol and browser-fixture validation; real footage reconstruction requires the configured runtime and assets. Monocular scale, depth and camera/world motion remain estimates. The reviewed EasyMocap license is [Project Registration License v1.0](https://github.com/zju3dv/EasyMocap/blob/e6006fd3814d5f8ad45a7ce965beb9bcc90767f2/LICENSE), which requires registration for organizational projects; body models and weights have separate terms.
+
 ## Connect Codex, Claude, or another MCP client
 
 Launch MCP using the **bridge Python**, pointing it to the heavy runtime through environment settings. Clients using `mcpServers` can merge this entry into their existing configuration:
@@ -220,7 +248,7 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **49 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **57 tools**, **14 workflow recipes** and **10 input schemas**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, native-job and separate video-capture state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
@@ -397,7 +425,7 @@ Read the [detailed change log](CHANGELOG.md) for numerical assessment and genera
 
 Choose **Review & fix**, select a completed candidate and choose **Source rig**. Click a joint in the viewer or search by name. Search narrows the joint list while keeping the skeleton visible. Use body-region filters, **Isolate selected chain**, joint labels and front/side/top camera views to inspect specific parts. Labels avoid colliding on screen, with the selected joint taking priority. On desktop, **Focus rig editor** places the viewer beside the controls; **Exit rig focus** returns to the regular Review layout. History remains accessible, and the workflow buttons take you back to Create or Export.
 
-For a small correction, enter local X/Y/Z offsets in degrees, choose the original start/end frames and blend length, then **Stage joint correction**. Undo, redo or reset the draft before **Save & inspect new version**. The viewer shows the selected saved motion until the backend validates and saves the edit. Every version remains selectable. **Original ghost** compares matching original frames, including after trimming; **Fitted character** separately shows the selected version's verified character preview when available.
+For a small correction, enter local X/Y/Z offsets in degrees, choose the original start/end frames and blend length, then **Stage joint correction**. Undo, redo or reset the draft before **Save & inspect new version**. A direct drag previews an explicitly marked unsaved pose at the current frame; the backend verifies it on release. Saving creates the playable corrected clip. Seeking or playing returns to the selected saved version until you save the draft. Every version remains selectable. **Original ghost** compares matching original frames, including after trimming; **Fitted character** separately shows the selected version's verified character preview when available.
 
 The review screen uses actual saved motion. A newly authored sequence is not a new animation until its generation completes. Read the [studio guide](docs/studio.md#inspect-and-correct-the-source-rig) for controls and keyboard shortcuts, and the [MCP correction guide](docs/rig-corrections.md) to perform the same edits through an assistant.
 
