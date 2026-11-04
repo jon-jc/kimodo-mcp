@@ -78,11 +78,14 @@ class AnimationPlanStore:
         try:
             raw = json.loads(payload)
             receipt = _Receipt.model_validate(raw)
-            values = receipt.model_dump(mode="json")
+            # New request controls may acquire defaults after a plan is saved.
+            # Validate them, but hash exactly the fields originally recorded so
+            # immutable plan identities do not change across additive releases.
+            values = receipt.model_dump(mode="json", exclude_unset=True)
             if values != raw:
                 raise ValueError("Saved animation plan is not canonical")
             content = _Content.model_validate({key: values[key] for key in _Content.model_fields})
-            if _hash(content.model_dump(mode="json")) != plan_id or receipt.plan_id != plan_id:
+            if _hash(content.model_dump(mode="json", exclude_unset=True)) != plan_id or receipt.plan_id != plan_id:
                 raise ValueError("Saved animation plan content hash does not match its identifier")
             if _hash(values["request"]) != receipt.request_sha256:
                 raise ValueError("Saved animation plan request checksum does not match")

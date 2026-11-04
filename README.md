@@ -34,9 +34,19 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Video reference capture | Use a separate EasyMocap runtime for bounded single-video body fitting, explicit short-occlusion estimates, confidence review and verified SMPL24/BVH outputs. |
 | Shared motion library | Find generated takes and both capture histories across browsers and agents, recover stage receipts, and open the exact source workflow. Recorded status is explicitly separate from fresh output verification. |
 | FreeMoCap capture | Check and synchronize videos, import a take, calibrate cameras, track detailed landmarks, inspect saved results and explicitly export through Blender using shared Studio/MCP controls. |
-| MCP interface | Use 68 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| Capture cleanup and character delivery | Trim verified FreeMoCap BVH, smooth selected windows, apply local joint offsets, review the fitted character and prepare a separate Unreal animation import. |
+| Native Kimodo controls | Choose all nine reviewed models, exact sampling/guidance settings, root paths, pose constraints and export flags; explicitly open the original workspace for its complete visual tools. |
+| MCP interface | Use 80 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
+
+## Native controls and capture-to-character workflow
+
+The **Native generation controls** section exposes the exact model, sampling steps, guidance mode and weights, transition overlap, heading, correction options and output formats. Author root-path anchors with optional interpolation, reuse pose/limb constraints from actual saved frames, or explicitly import/export validated request JSON. Saved plans preserve these settings. The **Original Kimodo workspace** card provides a separate explicit Start/Open/Stop flow for upstream visual tools, native file/example loading and rendering. Its runtime dependencies and models must be installed; native session files do not automatically enter managed job history. See the [feature-by-feature coverage matrix](docs/native-feature-coverage.md).
+
+![Studio native generation controls and registered character viewer](docs/images/studio-native-controls.jpg)
+
+For captured performances, open a verified export BVH and choose **Clean up & retarget**. Select the source units and T/A rest pose, trim original frames, smooth bounded windows and adjust individual character joints. Prepare first, run the fixed Blender handoff explicitly, inspect the animated character and cleanup evidence, then prepare a separate import into the matching Unreal project and rig. The same workflow is available to agents through `get_workflow("capture-character")`. Read the [complete capture cleanup and delivery guide](docs/capture-retarget.md) for all controls, six output files, frame conventions and recovery rules.
 
 ## Choose how to create the motion
 
@@ -109,7 +119,7 @@ After the weights are cached, restart the worker without `-AllowDownloads` for o
 .\scripts\start_studio.ps1 -DataDirectory "D:\KimodoData" -UpstreamDirectory "D:\KimodoData\upstream-kimodo" -StartWorker -OpenBrowser
 ```
 
-Open **[http://127.0.0.1:8768](http://127.0.0.1:8768)** if needed. The launcher builds missing interface files and starts the local server in the background. Use `-Build` after interface changes or `-Port 8769` for another port.
+Open **[http://127.0.0.1:8768](http://127.0.0.1:8768)** if needed. The launcher builds missing interface files and starts the local server in the background. Use `-Build` after interface changes or `-Port 8770` for another port (8769 is reserved for the original Kimodo workspace).
 
 **This launcher expects both environments created by the full setup script.** A standalone `.venv` installation uses the manual route below. The launcher does not start Blender or Unreal or install an operating-system service. Restart the worker and studio after reboot or configuration changes.
 
@@ -232,7 +242,7 @@ Measured multi-camera calibration supplies the geometry needed for metric recons
 
 The current FreeMoCap Blender export supports **MediaPipe only**. RTMPose remains available for landmark processing and inspection, but its Blender export is rejected. Animated glTF is excluded. Optional foot locking and hand-range cleanup change marker motion; they do not establish correct contacts or finger articulation. Export receipts report `export_settings_verified=false` because upstream configuration loading can fall back to addon defaults. Nonempty output files alone cannot certify the requested rest pose or cleanup.
 
-Landmark arrays, CSV/Parquet measurements, calibration files and optional `.blend`/FBX/BVH outputs remain distinct from the project's native Kimodo corrections and registered-character handoff. The adapter does not provide automatic SOMA conversion, a facial blendshape solver, general character retargeting or automatic Unreal skeleton compatibility. Better source footage and measured calibration support better reconstruction; the bridge does not promise AAA-quality motion.
+Landmark arrays, CSV/Parquet measurements, calibration files and optional `.blend`/FBX/BVH outputs remain distinct from the project's native Kimodo corrections and registered-character handoff. The adapter does not provide automatic SOMA conversion, a facial blendshape solver, general character retargeting or automatic Unreal skeleton compatibility. The explicit [capture-character workflow](docs/capture-retarget.md) accepts verified exported BVH and targets the registered fitted 24-bone character only. Better source footage and measured calibration support better reconstruction; the bridge does not promise AAA-quality motion.
 
 ### Inspect the saved performance before export
 
@@ -345,7 +355,7 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **68 tools**, **16 workflow recipes** and **11 input schemas**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, native-job and separate video-capture state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **80 tools**, **18 workflow recipes** and **12 input schemas**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, native-job and separate video-capture state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
@@ -353,6 +363,18 @@ The server exposes **68 tools**, **16 workflow recipes** and **11 input schemas*
 | `get_workflow` | Read an ordered workflow recipe without executing any actions. |
 | `get_input_schema` | Read the complete schema for briefs, revisions, requests, pose references, diagnostics, or Unreal targets. |
 | `get_workspace_state` | Read shared readiness, memory advisory, editor reachability, registered assets, saved target, saved plans, and recent jobs. |
+| `get_native_workspace` | Read owned native-workspace status without loading a model. |
+| `start_native_workspace` | Explicitly start the original pinned Kimodo UI with the chosen model on loopback port 8769. |
+| `stop_native_workspace` | Ask only the owned native session to stop and release its generation lease. |
+| `list_freemocap_character_handoffs` | Recover saved capture cleanup attempts from shared history. |
+| `inspect_freemocap_retarget_source` | Verify exported BVH provenance, timing and reviewed hierarchy before editing. |
+| `prepare_freemocap_character` | Save an immutable trim, cleanup and fitted-character retarget preparation. |
+| `execute_freemocap_character` | Run the fixed connected-Blender handoff and verify its character outputs. |
+| `get_freemocap_character` | Read and verify the exact selected capture-character result. |
+| `get_freemocap_character_artifact` | Retrieve one of six checksum-verified animation, character or cleanup artifacts. |
+| `prepare_freemocap_unreal` | Prepare animation import into an explicit existing matching Unreal rig, preserving capture FPS. |
+| `execute_freemocap_unreal` | Explicitly import the verified capture animation through the intended editor connection. |
+| `get_freemocap_unreal` | Inspect import evidence or unresolved-dispatch recovery state. |
 | `list_models` | Exact model IDs, skeletons, formats, and reviewed revision. |
 | `health_check` | Configuration and worker status; optional runtime/GPU probe without weight downloads. |
 | `plan_animation` | Compile a description/timed beats into explicit settings, optionally anchored to a source pose. |

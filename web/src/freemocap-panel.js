@@ -35,7 +35,7 @@ export class FreeMocapPanel {
       </section><section class="fmc-results" aria-label="Plans and recorded results">
         <div class="fmc-section-heading"><h3>Stage plan</h3><span id="fmc-plan-state" class="fmc-badge">Not reviewed</span></div><div id="fmc-plan-result" class="fmc-plan-result"><p class="help">Set the inputs on the left, then review the exact stage before running it.</p></div>
         <section class="fmc-recordings"><div class="fmc-section-heading"><h3>Recording inspection</h3><button id="fmc-inspect" class="small-button" type="button">Inspect recording</button></div><label class="field-label" for="fmc-inspect-recording">Recording</label><select id="fmc-inspect-recording"><option value="">Choose a recording</option></select><div id="fmc-inspection" class="fmc-output"><p class="help">Inspect saved output files and readiness independently of processing status.</p></div></section>
-        <section class="fmc-jobs"><div class="fmc-section-heading"><h3>Stage receipts</h3><button id="fmc-refresh-job" class="small-button" type="button">Refresh status</button></div><label class="field-label" for="fmc-receipts">Recent receipts in this workspace</label><select id="fmc-receipts"><option value="">No stage submitted yet</option></select><p id="fmc-history-state" class="help" role="status"></p><div class="fmc-receipt-entry"><input id="fmc-receipt-id" type="text" maxlength="32" aria-label="Receipt ID from another agent" placeholder="Or paste a receipt ID from an agent" /><button id="fmc-load-job" class="small-button" type="button">Load receipt</button></div><p id="fmc-job-state" class="help" role="status">A submitted pipeline is not a completed capture.</p><div class="fmc-actions"><button id="fmc-cancel-job" class="small-button" type="button" disabled>Cancel this pipeline</button><button id="fmc-use-recording" class="small-button" type="button" disabled>Use this recording</button><button id="fmc-use-sync" class="small-button" type="button" disabled>Use synchronization receipt</button></div><div id="fmc-job-result" class="fmc-output"></div><details class="advanced"><summary>Full receipt</summary><pre id="fmc-receipt-json">No receipt selected.</pre></details></section>
+        <section class="fmc-jobs"><div class="fmc-section-heading"><h3>Stage receipts</h3><button id="fmc-refresh-job" class="small-button" type="button">Refresh status</button></div><label class="field-label" for="fmc-receipts">Recent receipts in this workspace</label><select id="fmc-receipts"><option value="">No stage submitted yet</option></select><p id="fmc-history-state" class="help" role="status"></p><div class="fmc-receipt-entry"><input id="fmc-receipt-id" type="text" maxlength="32" aria-label="Receipt ID from another agent" placeholder="Or paste a receipt ID from an agent" /><button id="fmc-load-job" class="small-button" type="button">Load receipt</button></div><p id="fmc-job-state" class="help" role="status">A submitted pipeline is not a completed capture.</p><div class="fmc-actions"><button id="fmc-cancel-job" class="small-button" type="button" disabled>Cancel this pipeline</button><button id="fmc-use-recording" class="small-button" type="button" disabled>Use this recording</button><button id="fmc-use-sync" class="small-button" type="button" disabled>Use synchronization receipt</button><button id="fmc-retarget-history" class="small-button" type="button">Character cleanup history</button></div><div id="fmc-job-result" class="fmc-output"></div><details class="advanced"><summary>Full receipt</summary><pre id="fmc-receipt-json">No receipt selected.</pre></details></section>
       </section>
         <section id="fmc-review" class="fmc-review" aria-label="Captured body landmark review" hidden>
           <div class="fmc-section-heading"><h3>Review captured body landmarks</h3><span id="fmc-review-state" class="fmc-badge">Loading</span></div>
@@ -72,6 +72,7 @@ export class FreeMocapPanel {
     this.$('fmc-load-job').addEventListener('click', () => this.loadJob(this.$('fmc-receipt-id').value.trim()));
     this.$('fmc-refresh-job').addEventListener('click', () => this.loadJob(this.selectedJob));
     this.$('fmc-cancel-job').addEventListener('click', () => this.cancel());
+    this.$('fmc-retarget-history').addEventListener('click', () => this.openRetarget());
     this.$('fmc-review-play').addEventListener('click', () => this.landmarks?.togglePlay());
     this.$('fmc-review-scrub').addEventListener('input', event => this.landmarks?.seekFrame(Number(event.target.value)));
     this.$('fmc-review-fit').addEventListener('click', () => this.landmarks?.fit());
@@ -258,22 +259,30 @@ export class FreeMocapPanel {
     if (!job.pipeline_completion_verified) area.append(node('p', 'Submission and file readiness are separate observations. Do not assume a complete or usable animation from file presence.', 'fmc-warning'));
     if (job.operation === 'check_sync') area.append(node('p', 'Equal frame counts do not verify temporal alignment. Inspect the shared audio/flash and footage before reconstruction.', 'help'));
     const verifiedOutputs = successful && ['process', 'export'].includes(job.operation) && Array.isArray(job.outputs);
-    this.renderOutputs(area, verifiedOutputs ? job.outputs : job.recording?.outputs ?? [], verifiedOutputs ? job.job_id : null);
+    this.renderOutputs(area, verifiedOutputs ? job.outputs : job.recording?.outputs ?? [], verifiedOutputs ? job.job_id : null, verifiedOutputs && job.operation === 'export' ? job : null);
     if (canReviewFreeMocap(job)) {
       if (this.reviewGate.job !== job.job_id) this.reviewGate.select(job.job_id);
       return this.loadWindow(0, DEFAULT_WINDOW);
     } else { this.reviewGate.select(job.job_id); this.clearReview(); }
   }
-  renderOutputs(area, outputs, jobId = null) {
+  renderOutputs(area, outputs, jobId = null, exportJob = null) {
     if (!outputs.length) { area.append(node('p', 'No verified output files reported yet.', 'help')); return; }
     const list = node('ul', '', 'fmc-file-list');
     for (const output of outputs) {
       const item = node('li'); item.append(node('strong', output.path), node('span', `${Number(output.bytes || 0).toLocaleString()} bytes · SHA256 ${String(output.sha256 || '').slice(0, 12)}…`));
       const url = jobId && landmarkArtifactUrl(jobId, output.path);
       if (url) { const link = node('a', 'Download verified file'); link.href = url; link.download = output.path.split('/').pop(); item.append(link); }
+      if (exportJob && output.path.toLowerCase().endsWith('.bvh')) { const button = node('button', 'Clean up & retarget', 'small-button'); button.type = 'button'; button.addEventListener('click', () => this.openRetarget(exportJob, output.path)); item.append(button); }
       list.append(item);
     }
     area.append(list);
+  }
+  async openRetarget(job = null, path = null) {
+    try {
+      this.retargetPanel ??= new (await import('./capture-retarget-panel.js')).CaptureRetargetPanel();
+      if (!this.dialog.open) return;
+      if (job) await this.retargetPanel.open(job, path); else await this.retargetPanel.openHistory();
+    } catch (error) { this.message(error.message, true); }
   }
   clearReview() {
     this.reviewData = null; this.landmarks?.clear(); this.$('fmc-review').hidden = true;

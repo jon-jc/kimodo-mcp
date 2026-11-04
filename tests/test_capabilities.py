@@ -94,6 +94,8 @@ def _target(tmp_path):
 def _example_references(tmp_path):
     return {
         "input": {"job_id": "0" * 32, "other_job_id": "1" * 32, "sample_index": 0,
+                  "model": "kimodo-soma-rp-v1.2", "artifact_path": "output_data/capture.bvh",
+                  "capture_options": {"source_scale_to_meters": 1.0, "source_rest_pose": "tpose"},
                   "video_request": {"video_path": str(tmp_path / "fixture.mp4"), "duration_seconds": 1},
                   "freemocap_request": {"operation": "check_sync", "video_files": ["camera.mp4"]},
                   "title": "Greeting take", "description": "Approach, stop and greet.",
@@ -111,6 +113,7 @@ def _example_references(tmp_path):
                   "revision": {"description": "A person makes a slower wave."},
                   "start_from": {"job_id": "0" * 32, "sample_index": 0, "frame": 10}},
         "steps": {"submit": {"id": "2" * 32}, "retry": {"id": "3" * 32}, "build": {"attempt": 0},
+                  "prepare": {"handoff_id": "e" * 64},
                   "capture": {"job_id": "d" * 32, "recording_id": "kimodo-fixture"},
                   "plan": {"source": {"sha256": "a" * 64}},
                   "save": {"plan_id": "c" * 64},

@@ -129,12 +129,15 @@ class GenerateRequest(StrictModel):
     seed: Annotated[StrictInt, Field(ge=0, le=2**32 - 1)] = 0
     samples: Annotated[StrictInt, Field(ge=1, le=4)] = 1
     steps: Annotated[StrictInt, Field(ge=1, le=100)] = 50
+    cfg_type: Literal["separated", "regular", "nocfg"] = "separated"
+    cfg_regular: Annotated[Finite, Field(ge=0, le=20)] = 2.0
     cfg_text: Annotated[Finite, Field(ge=0, le=20)] = 2.0
     cfg_constraint: Annotated[Finite, Field(ge=0, le=20)] = 2.0
     transition_frames: Annotated[StrictInt, Field(ge=1, le=30)] = 5
     first_heading_angle: Annotated[Finite, Field(ge=-math.tau, le=math.tau)] = 0.0
     root_margin: Annotated[Finite, Field(ge=0, le=1)] = 0.04
     postprocess: Annotated[bool, Field(strict=True)] = True
+    real_robot_rotations: Annotated[bool, Field(strict=True)] = False
     bvh_standard_tpose: Annotated[bool, Field(strict=True)] = False
     formats: Annotated[list[OutputFormat], Field(min_length=1, max_length=4)] = Field(default_factory=lambda: ["npz"])
     constraints: Annotated[list[Constraint], Field(max_length=32)] = Field(default_factory=list)
@@ -148,9 +151,20 @@ class GenerateRequest(StrictModel):
     def effective_postprocess(self) -> bool:
         return self.postprocess and model_info(self.model)["postprocess_supported"]
 
+    @property
+    def cfg_weight(self) -> float | list[float]:
+        """Match the native denoiser's scalar versus separated guidance contract."""
+        if self.cfg_type == "separated":
+            return [self.cfg_text, self.cfg_constraint]
+        # The nocfg branch ignores this value. Retain the configured regular
+        # weight so switching modes never silently erases an authored setting.
+        return self.cfg_regular
+
     @model_validator(mode="after")
     def compatible_settings(self):
         info = model_info(self.model)
+        if self.real_robot_rotations and info["skeleton"] != "G1":
+            raise ValueError("real_robot_rotations is available only for G1 models.")
         if len(self.formats) != len(set(self.formats)):
             raise ValueError("Output formats must be unique.")
         if not set(self.formats).issubset(info["formats"]):
@@ -202,6 +216,18 @@ class GenerateRequest(StrictModel):
         timeline = self._segment_timeline(frames)
         density = self._constraint_density(timeline)
         advisories = []
+        if self.real_robot_rotations:
+            advisories.append({
+                "code": "g1_kinematic_projection", "severity": "warning",
+                "message": (
+                    "G1 rotations will be projected to one axis per joint and clamped to native XML limits. "
+                    "This can change feet and constraint positions; contact labels remain model predictions."
+                ),
+                "action": (
+                    "Inspect projected motion and constraint errors. Projection does not establish balance, "
+                    "collision avoidance, actuator feasibility, or safe real-robot execution."
+                ),
+            })
         if len(frames) > 1:
             advisories.append({
                 "code": "transition_context", "severity": "info",
@@ -252,6 +278,8 @@ class GenerateRequest(StrictModel):
             "duration_seconds": total / fps, "samples": self.samples,
             "postprocess": self.effective_postprocess, "formats": list(self.formats),
             "model": self.model,
+            "guidance": {"type": self.cfg_type, "weights": None if self.cfg_type == "nocfg" else self.cfg_weight},
+            "real_robot_rotations": self.real_robot_rotations,
             "frame_range_convention": "zero_based_half_open",
             "segment_timeline": timeline, "constraint_density": density,
             "advisories": advisories,

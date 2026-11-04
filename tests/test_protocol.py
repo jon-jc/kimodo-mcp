@@ -12,6 +12,10 @@ from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
 EXPECTED_TOOLS = {
+    "get_native_workspace", "start_native_workspace", "stop_native_workspace",
+    "list_freemocap_character_handoffs", "inspect_freemocap_retarget_source", "prepare_freemocap_character",
+    "execute_freemocap_character", "get_freemocap_character", "get_freemocap_character_artifact",
+    "prepare_freemocap_unreal", "execute_freemocap_unreal", "get_freemocap_unreal",
     "list_models", "health_check", "plan_animation", "generate_animation", "revise_animation",
     "extract_pose_constraint", "validate_motion", "generate_motion", "get_job", "list_jobs",
     "cancel_job", "get_job_log", "get_artifact", "inspect_motion", "preview_motion",
@@ -55,16 +59,13 @@ async def assert_agent_discovery(session):
         "kimodo://workflows/{workflow}", "kimodo://jobs/{job_id}/outputs",
     }
     assert all(template.mimeType == "application/json" and template.description for template in templates)
-    for name in ("generate_request", "animation_brief", "animation_revision", "pose_reference",
-                 "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision", "video_mocap_request", "freemocap_request"):
+    for name in (entry["id"] for entry in catalog["schemas"]):
         tool_schema = await session.call_tool("get_input_schema", {"schema_name": name})
         resource_schema = await session.read_resource(f"kimodo://schemas/{name}")
         assert not tool_schema.isError
         assert tool_schema.structuredContent == json.loads(resource_schema.contents[0].text)
         assert tool_schema.structuredContent["type"] == "object"
-    for name in ("generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-                 "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion",
-                 "saved-plans", "video-mocap", "freemocap"):
+    for name in (entry["id"] for entry in catalog["workflows"]):
         recipe = await session.call_tool("get_workflow", {"workflow": name})
         resource_recipe = await session.read_resource(f"kimodo://workflows/{name}")
         assert not recipe.isError

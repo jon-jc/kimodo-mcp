@@ -24,6 +24,8 @@ Call `get_workflow` with one of these identifiers:
 
 | Identifier | Purpose |
 | --- | --- |
+| `native-workspace` | Inspect, explicitly start and stop the original pinned Kimodo UI; its state is separate from managed jobs. |
+| `capture-character` | Verify an exported FreeMoCap BVH, prepare bounded cleanup, execute the fitted-character Blender handoff, review and separately deliver to Unreal. |
 | `freemocap` | Plan and explicitly submit synchronization, import, calibration, processing or Blender export stages to the separate local service. |
 | `video-mocap` | Check and fit a bounded single-person video with EasyMocap, inspect SMPL24 frames and retrieve verified artifacts. |
 | `resume-motion` | Find work from any client, preserve its source family, and inspect verified native or captured frames. |
@@ -242,3 +244,7 @@ If a client has an older cached tool list, reconnect it or start a new client se
 Call `list_motion_sources` before creating replacement work. Filter by `kimodo`, `easymocap` or `freemocap`, and follow `next_offset` for later pages. Each entry contains its source kind and ID, recorded status, and the matching status/review tool arguments. The list is metadata only; `verification="not_checked"` prevents historical completion from being mistaken for current file verification. Use `get_workflow("resume-motion")` to follow the appropriate branch.
 
 For a completed verified FreeMoCap process/export receipt, `inspect_freemocap_frames` reads body, hand or face positions and missing-value masks; `analyze_freemocap_quality` supplies body coverage and movement diagnostics with original review frames. `get_freemocap_artifact` verifies an exact output path before handing it to another application. These reads work offline once the result is verified, with registered storage still present. Pending/unknown stages still require live completion evidence. See the [capture-review guide](capture-review.md).
+
+## Capture cleanup and complete native controls
+
+Read the [capture retarget guide](capture-retarget.md) and `capture_retarget_request` schema before selecting source scale, rest pose or edit windows. Use original BVH frame indices, preserve source identity, and never treat a saved dispatch as completion. Read the [native coverage matrix](native-feature-coverage.md) for managed settings and original-workspace differences. `cfg_type` selects separated, regular or disabled guidance; `real_robot_rotations` is a G1-only kinematic projection, not physical validation. Native workspace startup is explicit and holds the shared generation lock until stopped.
