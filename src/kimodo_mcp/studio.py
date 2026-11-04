@@ -70,6 +70,8 @@ _ACTIONS = {
     "assess_motion_quality",
     "assess_motion_candidates",
     "create_motion_variant",
+    "preview_motion_variant",
+    "revise_motion_variant",
     "get_motion_variant",
     "inspect_motion_rig",
 }

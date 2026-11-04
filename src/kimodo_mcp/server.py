@@ -36,6 +36,7 @@ from .handoff import prepare_blender_handoff as prepare_blender_files
 from .handoff import prepare_character_handoff as prepare_character_files
 from .handoff import prepare_unreal_handoff as prepare_unreal_files
 from .jobs import contained_file, redact
+from .motion_revision import FrameSelection, VariantRevision
 from .motion_variants import SHA, VariantEdit
 from .planning import AnimationBrief, AnimationRevision, PoseReference, plan_revision
 from .planning import plan_animation as compile_animation_plan
@@ -373,6 +374,61 @@ def create_server(
         workspace.verified_native_output(job_id, name)
         return artifact
 
+    @mcp.tool(annotations=READ_ONLY)
+    async def preview_motion_variant(
+        job_id: str, edit: VariantEdit, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+        frame_indices: FrameSelection = [],
+    ) -> dict[str, Any]:
+        """Preview exact SOMA corrections without saving files, generating motion or launching editors.
+
+        Select up to 16 unique ORIGINAL source frames inside the retained trim; empty defaults to its first
+        frame. Returns corrected and original joint positions/global rotations, exact taper weights and
+        original parent-local offsets for interactive controls. All values use the existing variant FK.
+        """
+        from .motion_revision import preview_edit
+
+        source = await asyncio.to_thread(motion_artifact, job_id, f"motion_{sample_index:02d}.npz")
+        result = await asyncio.to_thread(
+            preview_edit, Path(source["absolute_path"]), source_sha256=source["sha256"],
+            job_id=job_id, sample_index=sample_index, edit=edit, frame_indices=frame_indices,
+        )
+        after = await asyncio.to_thread(motion_artifact, job_id, f"motion_{sample_index:02d}.npz")
+        if after["sha256"] != source["sha256"]:
+            raise ValueError("Motion source changed during correction preview")
+        return result
+
+    @mcp.tool(annotations=LOCAL_WRITE)
+    async def revise_motion_variant(
+        job_id: str, variant_id: SHA, revision: VariantRevision,
+        sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
+        save: Annotated[bool, Field(strict=True)] = False, frame_indices: FrameSelection = [],
+    ) -> dict[str, Any]:
+        """Preview or save a partial correction revision while preserving all unmentioned edit settings.
+
+        Joint updates replace named original-relative settings; new joints need angles and source-frame
+        bounds. remove_joints removes explicit existing corrections. Trimming never silently clamps joint
+        windows. Saving rebuilds from the original sample, preserving existing immutable variants.
+        """
+        from .motion_revision import revise_edit
+
+        original = await asyncio.to_thread(workspace.verified_motion_variant, job_id, variant_id,
+                                           sample_index=sample_index)
+        merged = revise_edit(VariantEdit.model_validate(original["edit"]), revision)
+        resolved = VariantEdit.model_validate(merged["edit"])
+        preview = await preview_motion_variant(job_id, resolved, sample_index, frame_indices)
+        after = await asyncio.to_thread(workspace.verified_motion_variant, job_id, variant_id,
+                                        sample_index=sample_index)
+        if after["artifact"]["sha256"] != original["artifact"]["sha256"]:
+            raise ValueError("Selected variant changed during correction revision")
+        context = {"source_variant_id": variant_id, "changes": merged["changes"],
+                   "joint_changes": merged["joint_changes"]}
+        if not save:
+            return {**preview, **context}
+        result = await create_motion_variant(job_id, resolved, sample_index)
+        if result["variant_id"] != preview["predicted_variant_id"]:
+            raise ValueError("Saved correction identity differs from its validated preview")
+        return {**result, **context, "saved": True}
+
     @mcp.tool(annotations=DERIVED_EXPORT)
     async def create_motion_variant(
         job_id: str, edit: VariantEdit, sample_index: Annotated[StrictInt, Field(ge=0, le=3)] = 0,
@@ -381,7 +437,7 @@ def create_server(
 
         Inspect the rig and original frames first. Local XYZ corrections are radians; windows are original
         zero-based source frames with an exclusive end. Smoothstep blends preserve window boundaries.
-        Every edit is relative to the original sample: submit the complete desired edit to revise a variant.
+        Every edit is relative to the original sample. Use revise_motion_variant to preserve unmentioned settings.
         Source files remain unchanged; identical edits reuse verified output. Effective joint corrections
         invalidate predicted contacts. No automatic contact repair, anatomical solver or rig rebuilding runs.
         """
@@ -402,7 +458,7 @@ def create_server(
         """Verify a saved correction and return its exact edit, original source, timing and output checksum.
 
         Use get_job to discover saved variants. Keep variant_id on all subsequent motion and editor calls.
-        To revise, submit a complete edit against the original sample with create_motion_variant.
+        Use revise_motion_variant for a partial-preserving revision, or create_motion_variant for a full edit.
         """
         return workspace.verified_motion_variant(job_id, variant_id, sample_index=sample_index)
 

@@ -63,6 +63,7 @@ Keep the actual job, sample, `source_kind`, and attempt consistent across prepar
 | `animation_revision` | Explicit changes to an existing request. |
 | `pose_reference` | A source job, sample index, and zero-based frame. |
 | `variant_edit` | Original-frame trimming, planar placement and bounded local XYZ joint corrections with edge blending. |
+| `variant_revision` | Partial placement and named-joint updates with explicit removals; see the [correction API](correction-api.md). |
 | `quality_policy` | Required numerical checks, caller-authored limits, contact/floor assumptions and explicit loop intent. |
 | `quality_thresholds` | Diagnostic sensitivities in physical units. |
 | `unreal_target` | Exact project, Skeleton, SkeletalMesh, destination directory, and asset name. |

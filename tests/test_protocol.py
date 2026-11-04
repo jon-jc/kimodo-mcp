@@ -22,6 +22,7 @@ EXPECTED_TOOLS = {
     "build_character_preview", "list_job_outputs", "inspect_motion_frames", "extract_motion_constraints",
     "export_motion", "assess_motion_quality", "assess_motion_candidates",
     "inspect_motion_rig", "create_motion_variant", "get_motion_variant",
+    "preview_motion_variant", "revise_motion_variant",
     "save_animation_plan", "get_animation_plan", "list_animation_plans", "revise_animation_plan",
     "generate_animation_plan",
 }
@@ -50,7 +51,7 @@ async def assert_agent_discovery(session):
     }
     assert all(template.mimeType == "application/json" and template.description for template in templates)
     for name in ("generate_request", "animation_brief", "animation_revision", "pose_reference",
-                 "quality_thresholds", "unreal_target", "quality_policy", "variant_edit"):
+                 "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision"):
         tool_schema = await session.call_tool("get_input_schema", {"schema_name": name})
         resource_schema = await session.read_resource(f"kimodo://schemas/{name}")
         assert not tool_schema.isError

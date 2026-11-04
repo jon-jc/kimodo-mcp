@@ -12,6 +12,7 @@ from typing import Any, Literal, get_args
 from .assessment import QualityPolicy
 from .catalog import UPSTREAM_REVISION, list_models
 from .handoff import UnrealTarget
+from .motion_revision import VariantRevision
 from .motion_variants import VariantEdit
 from .planning import QUALITY_STEPS, AnimationBrief, AnimationRevision, PoseReference
 from .schemas import GenerateRequest, QualityThresholds
@@ -22,7 +23,7 @@ WorkflowName = Literal[
 ]
 SchemaName = Literal[
     "generate_request", "animation_brief", "animation_revision", "pose_reference",
-    "quality_thresholds", "unreal_target", "quality_policy", "variant_edit",
+    "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision",
 ]
 WORKFLOW_IDS = get_args(WorkflowName)
 SCHEMA_IDS = get_args(SchemaName)
@@ -35,6 +36,7 @@ _SCHEMAS = {
     "quality_thresholds": QualityThresholds,
     "quality_policy": QualityPolicy,
     "variant_edit": VariantEdit,
+    "variant_revision": VariantRevision,
     "unreal_target": UnrealTarget,
 }
 
@@ -62,7 +64,8 @@ _GROUPS = {
     ),
     "outputs": ("Export and locate verified outputs", ("get_artifact", "list_job_outputs", "export_motion")),
     "corrections": ("Inspect rigs and save precise motion corrections",
-                    ("inspect_motion_rig", "create_motion_variant", "get_motion_variant")),
+                    ("inspect_motion_rig", "preview_motion_variant", "revise_motion_variant",
+                     "create_motion_variant", "get_motion_variant")),
     "blender": (
         "Export skeletons and the registered fitted character",
         ("prepare_blender_handoff", "prepare_character_handoff", "execute_blender_handoff",
@@ -159,6 +162,7 @@ _RECIPES = {
         "inputs": {"job_id": "Completed original job id.", "sample_index": "Original sample index, default 0.",
                    "name": "Matching native sample name, for example motion_00.npz.",
                    "edit": "Complete variant_edit relative to the original, including retained earlier changes.",
+                   "variant_revision": "Optional partial correction patch preserving unmentioned settings.",
                    "policy": "Explicit quality_policy used before and after the correction."},
         "requirements": ["Original source is a complete canonical SOMA30 or SOMA77 archive.",
                          "Inspect the problem in context and choose precise named joints and frame windows."],
@@ -170,9 +174,15 @@ _RECIPES = {
                   arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index"}),
             _step("before", "assess_motion_quality", "Keep the original source and policy hashes and problem windows.",
                   arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index", "policy": "input.policy"}),
+            _step("preview", "preview_motion_variant", "Exact original and corrected source-skeleton samples; no files or jobs are created.",
+                  arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index", "edit": "input.edit"}),
             _step("variant", "create_motion_variant", "An immutable corrected NPZ and verified edit receipt are saved.",
                   arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index", "edit": "input.edit"},
                   on_failure="Inspect the error; do not overwrite source or blindly retry an incomplete saved variant."),
+            _step("revise_preview", "revise_motion_variant", "Review a partial revision without replacing the saved version.",
+                  arguments={"save": False}, when="An existing correction needs another precise adjustment.",
+                  arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index",
+                                  "variant_id": "steps.variant.variant_id", "revision": "input.variant_revision"}),
             _step("after", "assess_motion_quality", "Recheck the selected variant under the identical policy.",
                   arguments_from={"job_id": "input.job_id", "sample_index": "input.sample_index",
                                   "variant_id": "steps.variant.variant_id", "policy": "input.policy"}),
@@ -183,7 +193,9 @@ _RECIPES = {
         "completion": "A verified saved correction, reviewed in context and on the target character before export.",
         "notes": [
             "All edit windows use original zero-based frames with an exclusive end; inspection uses selected-clip frames.",
-            "Re-edit with the full combined edit against the original; variants are never chained or overwritten.",
+            "revise_motion_variant preserves unmentioned settings; preview first, then repeat with save=true to save. Its resulting variant_id must replace the prior selector for subsequent review calls.",
+            "Preview frame_indices use original-source coordinates and default to the first retained frame. Preview samples are not saved animation artifacts.",
+            "Every saved revision rebuilds from the original sample; variants are never chained or overwritten.",
             "Effective joint corrections invalidate predicted contacts; missing evidence is not successful contact repair.",
             "Pass variant_id through inspection, constraints, comparison, assessment, export and every editor handoff.",
             "For original A versus trimmed variant B, use offset_frames=-edit.start_frame; B frame is A+offset.",

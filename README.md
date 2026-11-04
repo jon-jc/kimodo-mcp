@@ -31,7 +31,7 @@ The bridge uses a locally configured Kimodo runtime. It requires no OpenAI or An
 | Downloads | Retrieve original motion, animated GLB, skeletal mesh/animation FBX, and Blender projects when available. |
 | Precise rig corrections | Inspect all source joints, groups and local axes; save bounded local rotation corrections with smooth frame-window blends, trimming and planar placement. |
 | Numerical assessment | Apply explicit project limits to up to eight takes; inspect problem windows and unavailable evidence without an automatic quality ranking. |
-| MCP interface | Use 47 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
+| MCP interface | Use 49 typed tools over stdio or loopback Streamable HTTP, with a discoverable capability catalog, workflow recipes, input schemas, and shared local jobs. |
 
 **Character scope:** Kimodo generates motion on supported skeletons; it does not generate a new mesh. The fitted-character pipeline is tied to one inspected asset and its exact checksum. It is not a general automatic rigging system. New users can generate and review skeletal motion without that character. Unrelated characters need an appropriate rig and a separately validated retargeting workflow.
 
@@ -214,7 +214,7 @@ Blender and Unreal are separate connections. Registering `kimodo` alone does not
 
 ## MCP tools
 
-The server exposes **47 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
+The server exposes **49 tools**. Start with `get_capabilities` for the running server's complete inventory and `get_workspace_state` for worker, memory, editor, character, target, saved-plan, and recent-job state. `get_workflow` provides ordered recipes with completion evidence and failure guidance; `get_input_schema` exposes complete domain contracts, including advanced constraints. These discovery operations do not start inference or editor work. Submission is distinct from completed animation.
 
 | Tool | Purpose |
 | --- | --- |
@@ -248,6 +248,8 @@ The server exposes **47 tools**. Start with `get_capabilities` for the running s
 | `preview_motion` | Create a local interactive skeleton preview from completed NPZ. |
 | `inspect_motion_rig` | Read every joint, parent, body group, bone length, local axis and edit eligibility. |
 | `create_motion_variant` | Save precise source-relative SOMA corrections without inference or overwriting the original. |
+| `preview_motion_variant` | Preview exact original and corrected joint poses without creating files or jobs. |
+| `revise_motion_variant` | Preview or save a partial correction revision, preserving unmentioned settings. |
 | `get_motion_variant` | Verify a correction receipt, timing, edit settings and output checksum. |
 | `assess_motion_quality` | Check explicit physical limits and return source-bound problem-frame windows. |
 | `assess_motion_candidates` | Assess up to eight takes under the same reproducible policy, preserving input order. |
