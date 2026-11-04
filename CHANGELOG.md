@@ -2,6 +2,12 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-04 — Stable prop-helper checkout identity
+
+- Pin the two new asset-preview/prop-scene Python helpers to LF checkout bytes. Windows `core.autocrlf` previously changed their checksums after switching to the merged branch, so an unchanged converter could invalidate an otherwise verified saved scene.
+- Preserve strict source/converter/output verification and existing receipt identities; no completed report is rewritten or verification relaxed. Other handoff scripts retain their established checkout behavior.
+- Verified an actual Windows-style checkout of both helpers against their committed hashes and recovered the original verified prop scene without rerunning Blender. This fixes checkout stability; real helper-code changes still require new verification.
+
 ## 2026-11-04 — Shared model assets, UniRig, props and complete tool controls
 
 ### Added
