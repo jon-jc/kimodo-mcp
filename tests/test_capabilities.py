@@ -22,6 +22,7 @@ from kimodo_mcp.motion_variants import VariantEdit
 from kimodo_mcp.planning import AnimationBrief, AnimationRevision, PoseReference
 from kimodo_mcp.schemas import GenerateRequest, QualityThresholds
 from kimodo_mcp.server import create_server
+from kimodo_mcp.video_mocap import VideoMocapRequest
 
 
 def test_manifest_uses_actual_registry_without_inventing_or_omitting_tools(tmp_path):
@@ -64,6 +65,7 @@ def test_manifest_descriptions_and_annotations_are_copied_not_reinterpreted():
     ("quality_policy", QualityPolicy, {"checks": [{"metric": "bone_length_drift", "max_value": 0.005}]}),
     ("variant_edit", VariantEdit, {"start_frame": 2, "end_frame_exclusive": 30}),
     ("variant_revision", VariantRevision, {"yaw_radians": 0.2}),
+    ("video_mocap_request", VideoMocapRequest, {"video_path": "local-fixture.mp4"}),
     ("unreal_target", UnrealTarget, None),
 ])
 def test_schemas_are_complete_current_models_and_examples_validate(name, model, example, tmp_path):
@@ -88,6 +90,7 @@ def _target(tmp_path):
 def _example_references(tmp_path):
     return {
         "input": {"job_id": "0" * 32, "other_job_id": "1" * 32, "sample_index": 0,
+                  "video_request": {"video_path": str(tmp_path / "fixture.mp4"), "duration_seconds": 1},
                   "title": "Greeting take", "description": "Approach, stop and greet.",
                   "selected_plan_id": "c" * 64,
                   "request": {"segments": [{"text": "A person waves.", "duration": 2.0}]},

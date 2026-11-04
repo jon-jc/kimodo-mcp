@@ -1,0 +1,52 @@
+.video-dialog { width: min(1220px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 22px; border: 1px solid #414455; border-radius: 16px; color: #eeeaf5; background: #171a23; overflow-y: auto; box-sizing: border-box; }
+.video-dialog::backdrop { background: #080a12bd; backdrop-filter: blur(5px); }
+.video-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.video-dialog-heading h2 { margin: 6px 0 0; font-size: clamp(19px, 2vw, 27px); }
+.video-dialog fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.video-dialog fieldset:disabled { opacity: .65; }
+.video-dialog input, .video-dialog select { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.video-dialog [hidden] { display: none !important; }
+.video-dialog-heading > div { min-width: 0; }
+.video-dialog-heading > button { flex: 0 0 auto; }
+.video-dialog-heading h2 { overflow-wrap: anywhere; }
+.video-message { border: 1px solid #51466b; background: #282337; border-radius: 8px; padding: 12px; font-size: 13px; overflow-wrap: anywhere; }
+.video-message.error { background: #3c252e; border-color: #a85969; }
+.video-workspace { display: grid; grid-template-columns: minmax(240px, 330px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.video-setup, .video-review { min-width: 0; }
+.video-input-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.video-input-grid label { font-size: 12px; color: #bbb5cb; }
+.video-input-grid input, .video-input-grid select { margin-top: 6px; }
+.video-job-controls { display: flex; align-items: end; gap: 8px; flex-wrap: wrap; }
+.video-job-controls label { flex: 1 1 180px; min-width: 0; font-size: 12px; color: #bbb5cb; }
+.video-job-controls select { margin-top: 6px; }
+.video-compare { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.video-compare figure { margin: 0; min-width: 0; }
+.video-compare figcaption { margin: 0 0 8px; color: #bcb4cf; font-size: 12px; }
+.video-compare video, .video-rig { width: 100%; height: 290px; min-width: 0; border-radius: 10px; background: #10131c; }
+.video-compare video { display: block; object-fit: contain; }
+.video-rig { position: relative; overflow: hidden; }
+.video-rig canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+.video-rig > .help { position: absolute; left: 14px; right: 14px; top: 40%; text-align: center; }
+.video-playback { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 0; }
+.video-playback input { flex: 1 1 150px; width: auto; min-width: 0; }
+.video-playback output { color: #c4bed3; font-size: 12px; font-variant-numeric: tabular-nums; }
+.video-checks { display: grid; gap: 8px; margin: 14px 0; }
+.video-check { font-size: 12px; padding: 10px; border-radius: 7px; border: 1px solid #3b3e4f; overflow-wrap: anywhere; }
+.video-check strong { color: #e0ba82; }
+.video-check.ready strong { color: #9ed2b7; }
+.video-check p { margin: 5px 0 0; color: #b5afc5; line-height: 1.5; }
+.video-diagnostics { color: #bcb5ca; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.video-diagnostics strong { color: #e5dfee; }
+.video-table-scroll { max-width: 100%; max-height: 280px; overflow: auto; }
+.video-confidence-table { width: 100%; border-collapse: collapse; font-size: 12px; color: #d3cce1; }
+.video-confidence-table th, .video-confidence-table td { padding: 7px 9px; text-align: left; border-bottom: 1px solid #363848; overflow-wrap: anywhere; }
+.video-confidence-table tbody th { font-weight: 400; }
+.video-confidence-table td { font-variant-numeric: tabular-nums; }
+.video-confidence-table thead { background: #242635; }
+.video-downloads { display: flex; gap: 8px; flex-wrap: wrap; }
+.video-downloads a { text-decoration: none; overflow-wrap: anywhere; }
+.video-log { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: 11px; color: #bdb6ca; }
+.video-dialog a { color: #c9b8ff; }
+.video-entry { margin-top: 20px; padding-top: 18px; border-top: 1px solid #333544; }
+@media (max-width: 920px) { .video-workspace { grid-template-columns: minmax(0, 1fr); } .video-compare video, .video-rig { height: 320px; } }
+@media (max-width: 560px) { .video-dialog { padding: 14px; } .video-dialog-heading { align-items: start; } .video-compare { grid-template-columns: minmax(0, 1fr); } .video-compare video, .video-rig { height: 240px; } .video-input-grid { gap: 8px; } }

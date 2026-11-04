@@ -77,3 +77,5 @@ button, .button, .small-button { max-width: 100%; overflow-wrap: anywhere; }
   .editor-row .button { margin-left: 0; }
   .inspect-tabs { gap: 14px; flex-wrap: wrap; }
 }
+
+.reference-entry { margin-bottom: 16px; }

@@ -16,14 +16,16 @@ from .motion_revision import VariantRevision
 from .motion_variants import VariantEdit
 from .planning import QUALITY_STEPS, AnimationBrief, AnimationRevision, PoseReference
 from .schemas import GenerateRequest, QualityThresholds
+from .video_mocap import CAPABILITIES as VIDEO_CAPABILITIES
+from .video_mocap import VideoMocapRequest
 
 WorkflowName = Literal[
     "generate", "revise", "reuse-pose", "inspect", "compare", "export-motion", "export-skeleton",
-    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans",
+    "export-character", "import-unreal", "recover-job", "assess-candidates", "correct-motion", "saved-plans", "video-mocap",
 ]
 SchemaName = Literal[
     "generate_request", "animation_brief", "animation_revision", "pose_reference",
-    "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision",
+    "quality_thresholds", "unreal_target", "quality_policy", "variant_edit", "variant_revision", "video_mocap_request",
 ]
 WORKFLOW_IDS = get_args(WorkflowName)
 SCHEMA_IDS = get_args(SchemaName)
@@ -38,9 +40,15 @@ _SCHEMAS = {
     "variant_edit": VariantEdit,
     "variant_revision": VariantRevision,
     "unreal_target": UnrealTarget,
+    "video_mocap_request": VideoMocapRequest,
 }
 
 _GROUPS = {
+    "video_mocap": (
+        "Capture and review single-person local video",
+        ("plan_video_mocap", "start_video_mocap", "get_video_mocap_job", "list_video_mocap_jobs",
+         "get_video_mocap_log", "cancel_video_mocap_job", "inspect_video_mocap_frames", "get_video_mocap_artifact"),
+    ),
     "discovery": (
         "Discover capabilities and workspace readiness",
         ("get_capabilities", "get_workflow", "get_input_schema", "list_models", "health_check",
@@ -107,6 +115,35 @@ def _handoff_args(source_kind: str) -> tuple[dict, dict]:
 
 
 _RECIPES = {
+    "video-mocap": {
+        "title": "Fit and review a bounded single-person video capture",
+        "inputs": {"video_request": "video_mocap_request naming a local video and selected time interval."},
+        "requirements": ["An operator-installed pinned EasyMocap runtime, separately licensed assets and FFmpeg.",
+                         "One fully visible person and a static camera; monocular scale and depth remain uncertain."],
+        "steps": [
+            _step("contract", "get_input_schema", "Review detector, duration and frame bounds.",
+                  arguments={"schema_name": "video_mocap_request"}),
+            _step("plan", "plan_video_mocap", "ready is true; review source fingerprint, limits and every preflight check.",
+                  arguments_from={"request": "input.video_request"},
+                  on_failure="Resolve the reported operator setup or source-selection problem. No capture has started."),
+            _step("submit", "start_video_mocap", "A separate capture job id is returned; this is not completion.",
+                  arguments_from={"request": "input.video_request"},
+                  when="The user requested capture and the reviewed selection is ready.",
+                  on_failure="Check list_video_mocap_jobs before retrying an uncertain submission."),
+            _step("job", "get_video_mocap_job", "Poll until completed and output verification succeeds.",
+                  arguments_from={"job_id": "steps.submit.id"},
+                  on_failure="Read get_video_mocap_log and detection diagnostics; missing frames are not replaced by invented poses."),
+            _step("inspect", "inspect_video_mocap_frames", "Review actual SMPL24 positions and image confidences.",
+                  arguments={"frame_indices": [0]}, arguments_from={"job_id": "steps.submit.id"}),
+            _step("artifact", "get_video_mocap_artifact", "Get a checksum-verified BVH for explicit downstream retargeting.",
+                  arguments={"name": "motion.bvh"}, arguments_from={"job_id": "steps.submit.id"}),
+        ],
+        "completion": "A verified capture and review artifacts exist; correct reconstruction or character retargeting is not implied.",
+        "notes": ["Inspect reference.mp4, detections and timing before approving motion.",
+                  "Capture indices start at zero within the trim. Times are requested constant-rate samples, not camera exposure timestamps.",
+                  "SMPL24 is separate from SOMA: do not use video job ids with Kimodo pose, correction or character handoff tools.",
+                  "Cancel explicitly with cancel_video_mocap_job and poll until terminal; no automatic retry or model download runs."],
+    },
     "saved-plans": {
         "title": "Author, save and revise a reproducible animation plan before generating",
         "inputs": {"title": "A meaningful shot or take label.",
@@ -540,6 +577,9 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
         "schema_version": 1, "reviewed_revision": UPSTREAM_REVISION,
         "tool_count": len(by_name), "tools": [by_name[name] for name in sorted(by_name)], "tool_groups": groups,
         "models": list_models(),
+        "video_mocap": {"request_schema": "video_mocap_request", "workflow": "video-mocap",
+                        "separate_job_namespace": True, "bvh_units": "meters", "skeleton": "smpl24",
+                        "space": "camera-relative", "scale": "estimated", **deepcopy(VIDEO_CAPABILITIES)},
         "schemas": [{"id": name, "title": model.__name__, "uri": f"kimodo://schemas/{name}"}
                     for name, model in _SCHEMAS.items()],
         "workflows": [{"id": name, "title": recipe["title"], "uri": f"kimodo://workflows/{name}"}
@@ -604,7 +644,7 @@ def build_capabilities(tool_metadata: list[dict]) -> dict[str, Any]:
             "Facial animation, independent finger animation, cloth/hair physics or collision simulation in the fitted-character workflow.",
             "Automatic cross-rig retargeting, seamless stitching, velocity matching, arbitrary resampling or automatic contact repair.",
             "Initial Unreal skeletal-mesh import through this server; use the editor's import tools first.",
-            "Arbitrary external file import/conversion, training, benchmark execution, video/audio rendering; compatible completed managed NPZ export is supported.",
+            "Arbitrary external file import/conversion, training, benchmark execution or general video/audio rendering; managed NPZ export and bounded single-person video capture are explicit exceptions.",
             "Arbitrary code execution or file read/write, dependency installation or worker/editor startup; explicit Unreal target paths are a bounded import exception.",
             "Public remote hosting or multi-user authorization.",
         ],

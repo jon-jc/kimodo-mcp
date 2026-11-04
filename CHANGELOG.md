@@ -2,6 +2,24 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-03 — Video reference capture through EasyMocap
+
+### Added
+
+- Eight shared MCP/Studio operations cover preflight, explicit start, durable job listing/status, bounded logs, cancellation, source-frame inspection and verified artifact retrieval. Discovery now contains 57 tools, 14 recipes and 10 schemas; video jobs remain separate from Kimodo generation.
+- An original adapter calls audited stages from pinned EasyMocap `e6006fd3814d5f8ad45a7ce965beb9bcc90767f2`: bounded FFmpeg sampling, MediaPipe or YOLO/HRNet BODY25 detection, assumed-camera initialization, robust SPIN/SMPL fitting with temporal regularization, normalization and numerical BVH export. Runtime/models stay external; fixed argument lists and blocked external-stage networking avoid wrapper quoting and implicit-download problems.
+- Immutable source/request/asset/output receipts, one active capture lock, process-creation identity checks, owned-child cancellation and orphan detection. Starts can bind to the previously checked video hash. Missing/changed sources, assets and outputs fail verification.
+- Explicit optional short-gap 2D interpolation (0–15 frames; strict by default) preserves original observations, time and low-confidence estimate flags. It rejects ambiguous identities, extrapolation, long gaps, gross discontinuity and collapsed intermediate bodies.
+- Correct SMPL24 normalization includes shaped-pelvis root translation, camera-to-viewer rotation and full upstream FK agreement. BVH preserves hierarchy traversal, meter translations, frame rate and continuous rotation branches. The known upstream root-export bug is not reused.
+- A responsive video dialog provides bounded local file copying, trim/detector/gap settings, actionable readiness, stage/log/cancel controls, synchronized reference/skeleton playback, problem-frame diagnostics, BODY25 confidence and verified downloads. Stale selection/plan responses cannot replace newer work; a submitted plan is consumed before dispatch.
+- Detailed runtime/setup guide and source audit distinguish integrated functions, adjacent upstream features, licensing, uncertainty and retargeting requirements.
+
+### Validation and boundaries
+
+- Python validation includes independent FK and BVH reimport, mocked complete pipeline and cancellation, gap policies, receipt tampering, source-bound dispatch, HTTP upload/download guards and actual MCP discovery. Frontend tests cover request bounds, hashes, confidence, races and submission gating; the production build passes.
+- Live browser checks copied a synthetic reference and showed the missing-runtime setup result. A separate synthetic fixture exercised completed skeleton/video review, shared scrubbing and explicitly marked low-confidence frames. This is interface validation, not a real motion-capture reconstruction.
+- Real inference was not run. Ordinary footage does not guarantee correct depth, scale, identity, hidden limbs or contacts. Captures use SMPL24 and require explicit character retargeting before Unreal use; automatic SOMA handoffs, facial/finger capture and production animation acceptance are not implied.
+
 ## 2026-11-03 — Direct skeleton manipulation and reliable editing drafts
 
 ### Added
