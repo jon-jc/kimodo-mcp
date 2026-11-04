@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CaptureGate, CaptureSelection, captureDiagnosticLines, captureEvidence, captureFileUrl, captureFrame, capturePreview, checkVideoFile, videoRequest } from '../src/video-data.js';
+import { CaptureGate, CaptureSelection, captureDiagnosticLines, captureEvidence, captureFileUrl, captureFrame, captureOption, capturePreview, checkVideoFile, videoRequest } from '../src/video-data.js';
 
 const values = { video_path: 'D:\\References\\walk.mp4', start_seconds: 2, duration_seconds: 4, fps: 30, detector: 'mp-pose' };
 
@@ -57,6 +57,14 @@ test('capture reads and delayed submissions cannot replace a newer selection or 
   assert.equal(state.currentRead(second), false);
   const pending = state.beginRead(); state.invalidate();
   assert.equal(state.currentRead(pending), false);
+});
+
+test('an older library capture gets a selected dropdown label bound to its exact loaded identity', () => {
+  const id = 'e'.repeat(32), job = { id, status: 'completed', request: { video_path: 'D:\\References\\older take.mp4' } };
+  assert.deepEqual(captureOption(job, id), { value: id, label: 'eeeeeeee · completed · older take.mp4' });
+  assert.equal(captureOption({ ...job, status: 'failed' }, id).label, 'eeeeeeee · failed · older take.mp4');
+  assert.throws(() => captureOption(job, 'f'.repeat(32)), /selected job/);
+  assert.throws(() => captureOption({ id: '../other' }, '../other'), /selected job/);
 });
 
 function previewFixture() {

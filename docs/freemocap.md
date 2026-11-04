@@ -49,7 +49,7 @@ The observer retains the actual pipeline object through verified worker exit. It
 
 `get_freemocap_capabilities` reports base `compatible` separately from `status_extension.available`. Base compatibility checks the reported version and required route presence; the extension's launcher checks the actual source revision. Neither check proves model readiness, camera calibration or capture accuracy. No installed runtime or real video processing is claimed by this release's synthetic tests.
 
-## Seven shared operations
+## Shared stage and review operations
 
 | Tool | Purpose |
 | --- | --- |
@@ -60,8 +60,23 @@ The observer retains the actual pipeline object through verified worker exit. It
 | `start_freemocap_capture(request)` | Explicitly submit that stage and retain a local receipt. |
 | `get_freemocap_job(job_id)` | Poll this adapter's receipt and, where available, bound completion evidence. |
 | `cancel_freemocap_job(job_id)` | Cancel only the exact calibration/processing pipeline in this adapter's receipt. |
+| `inspect_freemocap_frames(job_id, frame_indices=[], aspect="body")` | Read up to 16 original body, hand or face frames from verified completed outputs, preserving missing-point masks and native units. |
+| `analyze_freemocap_quality(job_id)` | Read body output availability, consecutive gaps, adjacent-frame movement and suggested review frames without a quality score. |
+| `get_freemocap_artifact(job_id, path)` | Verify and locate an exact output path listed in a completed process/export receipt. This does not run an export. |
 
 Job IDs are 32 lowercase hexadecimal characters. Recording IDs are bounded identifiers, not paths. Cancellation is unavailable for synchronization because the pinned upstream has no scoped synchronization cancel route. It never shuts down the service or stops all pipelines.
+
+## Review saved results with the service stopped
+
+Use `list_motion_sources(source_kind="freemocap", limit=30, offset=0)` to recover shared stage history, including receipts created by another browser or agent. This metadata-only index does not contact the capture service or verify outputs. Keep `source_kind` with `source_id`, inspect the returned source-specific receipt, and distinguish recorded status from current verification. `get_workflow("resume-motion")` provides the complete cross-source recovery recipe.
+
+Verified completed process/export receipts support offline frame inspection, body diagnostics and output retrieval. The existing operator registration, original sources, calibration evidence and saved files must still match. Pending or uncertain outcomes require the original service evidence and are not completed by offline review.
+
+In **Create → Open capture workspace**, selecting a completed processed take opens the read-only body landmark viewer. Load a contiguous window, scrub original frames, select a point to inspect its native coordinates, and follow the numerical review's suggested frames. The viewer shows body points and virtual centers. Hands and face are available through `inspect_freemocap_frames` using the appropriate `aspect`; they are not currently rendered in this body viewer.
+
+The review preserves missing points as `null` triplets with a validity mask. It distinguishes planar `pixels`, proven measured `millimeters` and otherwise unspecified `calibration_units`; no meter scale is guessed. New receipts preserve nominal source FPS, while legacy receipts without timing remain frame-based. Diagnostics describe processed output after interpolation/filtering, not raw tracking confidence, contact accuracy or anatomical acceptance.
+
+See [capture review, profiles and agent examples](capture-review.md) for exact tools, bounded preview/download routes, body/hand/face ordering, virtual-point semantics, source citations and verification limits. Offline inspection never runs tracking or Blender; producing a new export remains a separate explicit stage.
 
 ## Stage-by-stage workflow
 

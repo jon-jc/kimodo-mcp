@@ -45,6 +45,8 @@ from .quality import analyze_motion, compare_motion
 from .review import compare_motion_reviews
 from .review import create_motion_review as create_review_file
 from .schemas import GenerateRequest, QualityThresholds
+from .source_library import SourceKind
+from .source_library import list_motion_sources as source_history
 from .video_api import register_video_tools
 from .video_mocap import list_video_mocap_jobs
 from .workspace import Workspace, handoff_directory_name
@@ -336,6 +338,21 @@ def create_server(
     def list_jobs(limit: Annotated[int, Field(ge=1, le=100)] = 20) -> dict[str, Any]:
         """List recent jobs shared by clients configured with the same data directory."""
         return {"jobs": store.list(limit)}
+
+    @mcp.tool(annotations=READ_ONLY)
+    def list_motion_sources(
+        source_kind: SourceKind = "all",
+        limit: Annotated[StrictInt, Field(ge=1, le=100)] = 30,
+        offset: Annotated[StrictInt, Field(ge=0, le=10000)] = 0,
+    ) -> dict[str, Any]:
+        """Recover shared Kimodo, EasyMocap and FreeMoCap history without contacting a runtime.
+
+        Returns paginated recorded metadata and source-specific status/review tool arguments. A recorded
+        completed status is not fresh artifact verification. Keep source_kind with source_id; identities
+        from different workflows are not interchangeable. Inspect the exact receipt before continuing.
+        History includes uncertain FreeMoCap submissions from other browsers or agents, with no retry.
+        """
+        return source_history(settings, source_kind, limit, offset)
 
     @mcp.tool(annotations=CANCEL)
     def cancel_job(job_id: str) -> dict[str, Any]:

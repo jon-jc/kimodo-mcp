@@ -50,6 +50,12 @@ export function captureFileUrl(id, name) {
   return `/api/video-mocap/${id}/files/${encodeURIComponent(name)}`;
 }
 
+export function captureOption(job, selectedId) {
+  if (!/^[a-f0-9]{32}$/.test(selectedId) || job?.id !== selectedId) throw new Error('The saved capture does not match the selected job.');
+  const name = String(job.request?.video_path ?? '').split(/[\\/]/).pop();
+  return { value: selectedId, label: `${selectedId.slice(0, 8)} · ${job.status ?? 'unknown'}${name ? ` · ${name}` : ''}` };
+}
+
 export function captureFrame(time, frames, fps) {
   if (!Number.isFinite(time) || !Number.isInteger(frames) || frames < 1 || !Number.isFinite(fps) || fps <= 0) return 0;
   return Math.max(0, Math.min(frames - 1, Math.round(time * fps)));

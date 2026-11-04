@@ -29,7 +29,7 @@ async def invoke(mcp, name, arguments):
 async def test_exact_inventory_annotations_and_no_runtime_import(server):
     mcp, _ = server
     tools = {tool.name: tool for tool in await mcp.list_tools()}
-    assert set(tools) == set(TOOL_NAMES) and len(tools) == 7
+    assert set(tools) == set(TOOL_NAMES) and len(tools) == 10
     assert tools["plan_freemocap_capture"].annotations.readOnlyHint
     assert tools["start_freemocap_capture"].annotations.idempotentHint is False
     assert tools["start_freemocap_capture"].annotations.destructiveHint
@@ -175,3 +175,19 @@ def test_studio_exposes_all_actions_without_polling_external_runtime(tmp_path, m
         assert calls == ["capabilities", "list"]
         from kimodo_mcp.studio import _ACTIONS
         assert set(TOOL_NAMES) <= _ACTIONS
+
+
+async def test_review_tools_are_readonly_typed_and_forward_exact_selectors(server, monkeypatch):
+    from kimodo_mcp import freemocap_review as review
+    mcp, settings = server
+    seen = []
+    monkeypatch.setattr(review, "inspect_freemocap_frames", lambda *args: seen.append(args) or {"frames_inspected": []})
+    result = await invoke(mcp, "inspect_freemocap_frames", {"job_id": "a" * 32, "frame_indices": [4, 2], "aspect": "left_hand"})
+    assert result == {"frames_inspected": []}
+    assert seen == [(settings, "a" * 32, [4, 2], "left_hand")]
+    for name in ["inspect_freemocap_frames", "analyze_freemocap_quality", "get_freemocap_artifact"]:
+        tool = next(tool for tool in await mcp.list_tools() if tool.name == name)
+        assert tool.annotations.readOnlyHint and not tool.annotations.destructiveHint
+    for bad in [{"frame_indices": [True]}, {"frame_indices": [-1]}, {"frame_indices": list(range(17))}, {"aspect": "unknown"}]:
+        with pytest.raises(Exception):
+            await mcp.call_tool("inspect_freemocap_frames", {"job_id": "a" * 32, **bad})

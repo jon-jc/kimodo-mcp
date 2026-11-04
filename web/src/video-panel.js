@@ -1,6 +1,6 @@
 import { action, request } from './api.js';
 import { RigViewer } from './rig-viewer.js';
-import { CAPTURE_ARTIFACTS, CAPTURE_TERMINAL, CaptureGate, CaptureSelection, captureDiagnosticLines, captureEvidence, captureFileUrl, capturePreview, checkVideoFile, videoRequest } from './video-data.js';
+import { CAPTURE_ARTIFACTS, CAPTURE_TERMINAL, CaptureGate, CaptureSelection, captureDiagnosticLines, captureEvidence, captureFileUrl, captureOption, capturePreview, checkVideoFile, videoRequest } from './video-data.js';
 import './video.css';
 
 const node = (tag, text, className) => { const item = document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item; };
@@ -151,7 +151,7 @@ export class VideoPanel {
       this.$('video-job').replaceChildren(node('option', jobs.length ? 'Choose a capture' : 'No captures yet'));
       this.$('video-job').firstChild.value = '';
       for (const job of jobs) {
-        const option = node('option', `${job.id.slice(0, 8)} · ${job.status} · ${(job.request?.video_path ?? '').split(/[\\/]/).pop()}`);
+        const option = node('option', captureOption(job, job.id).label);
         option.value = job.id; this.$('video-job').append(option);
       }
       this.$('video-job').value = chosen;
@@ -186,6 +186,10 @@ export class VideoPanel {
     const token = this.selection.beginRead();
     const job = await action('get_video_mocap_job', { job_id: id });
     if (!this.selection.currentRead(token)) return;
+    const choice = captureOption(job, id), selector = this.$('video-job');
+    let option = [...selector.options].find(item => item.value === choice.value);
+    if (!option) { option = node('option'); option.value = choice.value; selector.append(option); }
+    option.textContent = choice.label; selector.value = choice.value;
     this.currentJob = job;
     if (job.status !== 'completed' || job.verification_error || !job.output) this.clearReview();
     this.$('video-job-status').textContent = `${job.status} · ${job.stage || 'waiting'}${job.error || job.verification_error ? ` — ${job.error || job.verification_error}` : ''}`;

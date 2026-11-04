@@ -2,6 +2,24 @@
 
 Each delivery is reviewed as a pull request and merged after its required checks pass. Entries describe implemented behavior and validation separately from artistic or engine acceptance.
 
+## 2026-11-03 — Shared source history and verified capture review
+
+### Added
+
+- A paginated, offline motion-source library combines Kimodo jobs, EasyMocap captures and FreeMoCap stage receipts across agents/browsers. Source family and ID remain paired; recorded statuses are explicitly unverified metadata. Corrupt or oversized records do not hide other sources, scan limits are reported, and SQLite read handles close immediately.
+- Four new shared MCP operations: `list_motion_sources`, `inspect_freemocap_frames`, `analyze_freemocap_quality` and `get_freemocap_artifact`. The catalog exposes 68 tools, 16 workflows and 11 input schemas, including a source-aware resume recipe and explicit representation/consumer boundaries.
+- Offline, receipt-bound body/left-hand/right-hand/face inspection using reviewed MediaPipe/RTMPose output layouts. NaNs remain missing triplets with validity masks; virtual centers are labeled. The known upstream tracker-schema mismatch is ignored. Original units, measured-calibration provenance and optional nominal video timing remain explicit.
+- Body diagnostics report processed-output coverage, missing runs and adjacent-valid-frame movement, with suggested original frames to inspect. They never bridge missing intervals or assign a realism score. Memory-mapped NPY reads reject pickle/object layouts and close even when validation fails.
+- A separate read-only landmark viewer with exact contiguous windows, original-frame stepping, nominal-time playback when available, missing-point/edge visibility, landmark picking, diagnostic frame shortcuts and verified downloads. The native rig editor is unchanged.
+- Completed FreeMoCap processing/export receipts can be reopened with the external service stopped. New process receipts preserve video metadata; legacy timing remains unavailable. Review rechecks selected receipts, underlying process sources and output hashes before returning results.
+- Detailed shared-history and capture-review documentation, source attribution and agent recipes. Studio captures illustrate actual controls; synthetic review examples are labeled explicitly.
+
+### Validation and boundaries
+
+- Local validation: 944 Python tests passed, one Windows symlink test skipped, and 95 frontend tests passed; lint and production build passed. Tests cover profile ordering, exact frame windows, missing/invalid data, units and timing, evidence changes, bounded history, cross-client recovery, response races and MCP/Studio parity.
+- A fresh stdio client discovered all 68 tools, 11 schemas and 16 recipes and exercised each new read-only tool against a separate synthetic fixture. Browser checks covered offline receipt recovery, missing and fully absent poses, original frames beyond 2,400, landmark selection, play/pause, narrow layouts, history filters and returning to a saved native take. Both new screenshots document actual controls; the capture example is explicitly synthetic.
+- This release adds inspection and continuity. It does not run real tracking, infer rig rotations from landmarks, automatically repair contacts, retarget a character, or establish production animation quality. No inference worker, capture service or editor is started by history or review.
+
 ## 2026-11-03 — FreeMoCap as a core Studio and MCP capture workflow
 
 ### Added

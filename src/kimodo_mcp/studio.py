@@ -22,6 +22,7 @@ from starlette.routing import Route
 from .capacity import capacity_snapshot, editor_connections
 from .config import Settings
 from .freemocap_api import TOOL_NAMES as FREEMOCAP_TOOL_NAMES
+from .freemocap_api import freemocap_routes
 from .jobs import JobStore, contained_file, redact
 from .server import create_server
 from .video_api import TOOL_NAMES as VIDEO_TOOL_NAMES
@@ -31,6 +32,7 @@ from .workspace import Workspace
 
 _MAX_BODY = 1024 * 1024
 _ACTIONS = {
+    "list_motion_sources",
     "plan_animation",
     "generate_animation",
     "revise_animation",
@@ -298,6 +300,7 @@ def create_app(settings: Settings | None = None, web_directory: Path | None = No
             Route("/api/character/model.glb", initial_character),
             Route("/api/files/{job_id}/{path:path}", download),
             *video_routes(settings, csrf),
+            *freemocap_routes(settings),
             Route("/{path:path}", web),
         ]
     )
